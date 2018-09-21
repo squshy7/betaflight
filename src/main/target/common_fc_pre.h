@@ -125,9 +125,9 @@
 #define USE_CLI
 #define USE_GYRO_REGISTER_DUMP  // Adds gyroregisters command to cli to dump configured register values
 //#define USE_PPM
-#define USE_PWM
+//#define USE_PWM
 #define USE_SERIAL_RX
-#define USE_SERIALRX_CRSF       // Team Black Sheep Crossfire protocol
+//#define USE_SERIALRX_CRSF       // Team Black Sheep Crossfire protocol
 #define USE_SERIALRX_IBUS       // FlySky and Turnigy receivers
 #define USE_SERIALRX_SBUS       // Frsky and Futaba receivers
 #define USE_SERIALRX_SPEKTRUM   // SRXL, DSM2 and DSMX protocol
@@ -169,11 +169,11 @@
 #define USE_DSHOT_DMAR
 #define USE_GYRO_OVERFLOW_CHECK
 #define USE_YAW_SPIN_RECOVERY
-#define USE_HUFFMAN
+//#define USE_HUFFMAN
 #define USE_MSP_DISPLAYPORT
 #define USE_MSP_OVER_TELEMETRY
-#define USE_PINIO
-#define USE_PINIOBOX
+//#define USE_PINIO
+//#define USE_PINIOBOX
 #define USE_RCDEVICE
 #define USE_RTC_TIME
 #define USE_RX_MSP
