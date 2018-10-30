@@ -24,7 +24,7 @@
 
 // Removed to make the firmware fit into flash (in descending order of priority):
 //#undef USE_RTC_TIME
-//#undef USE_RX_MSP
+#undef USE_RX_MSP
 //#undef USE_ESC_SENSOR_INFO
 
 #define LED0_PIN                 PC1
