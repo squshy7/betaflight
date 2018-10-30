@@ -51,13 +51,8 @@
 //#undef USE_BOARD_INFO
 //#undef USE_RX_MSP
 //#undef USE_RTC_TIME
-<<<<<<< HEAD
 //#undef USE_EXTENDED_CMS_MENUS
 //#undef USE_ESC_SENSOR_INFO
-=======
-#undef USE_EXTENDED_CMS_MENUS
-#undef USE_ESC_SENSOR_INFO
->>>>>>> 3.5.x-maintenance
 
 
 #define CURRENT_TARGET_CPU_VOLTAGE 3.0
