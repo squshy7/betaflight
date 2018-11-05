@@ -125,7 +125,7 @@
 #define USE_CLI
 #define USE_GYRO_REGISTER_DUMP  // Adds gyroregisters command to cli to dump configured register values
 #define USE_PPM
-#define USE_PWM
+//#define USE_PWM
 #define USE_SERIAL_RX
 #define USE_SERIALRX_CRSF       // Team Black Sheep Crossfire protocol
 #define USE_SERIALRX_IBUS       // FlySky and Turnigy receivers
@@ -144,7 +144,7 @@
 #endif
 
 #if (FLASH_SIZE > 64)
-#define USE_ACRO_TRAINER
+//#define USE_ACRO_TRAINER
 #define USE_BLACKBOX
 #define USE_LED_STRIP
 #define USE_RESOURCE_MGMT
@@ -157,8 +157,8 @@
 #define USE_TELEMETRY_SMARTPORT
 #define USE_ITERM_RELAX
 #define USE_RC_SMOOTHING_FILTER
-#define USE_ABSOLUTE_CONTROL
-#define USE_SMART_FEEDFORWARD
+//#define USE_ABSOLUTE_CONTROL
+//#define USE_SMART_FEEDFORWARD
 #define USE_THROTTLE_BOOST
 #endif
 
