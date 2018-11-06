@@ -43,7 +43,7 @@
 //#undef USE_MSP_DISPLAYPORT
 //#undef USE_MSP_OVER_TELEMETRY
 
-#undef USE_LED_STRIP
+//#undef USE_LED_STRIP
 //#undef USE_HUFFMAN
 //#undef USE_PINIO
 //#undef USE_PINIOBOX
