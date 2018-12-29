@@ -24,13 +24,13 @@
 
 // Removed to make the firmware fit into flash (in descending order of priority):
 #undef USE_GYRO_OVERFLOW_CHECK
-//#undef USE_GYRO_LPF2
+#undef USE_GYRO_LPF2
 
-//#undef USE_RC_SMOOTHING_FILTER
-//#undef USE_DYN_LPF
+#undef USE_RC_SMOOTHING_FILTER
+#undef USE_DYN_LPF
 
-//#undef USE_ITERM_RELAX
-//#undef USE_RC_SMOOTHING_FILTER
+#undef USE_ITERM_RELAX
+#undef USE_RC_SMOOTHING_FILTER
 
 #undef USE_HUFFMAN
 #undef USE_PINIO

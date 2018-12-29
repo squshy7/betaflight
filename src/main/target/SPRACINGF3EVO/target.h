@@ -31,10 +31,10 @@
 // Removed to make the firmware fit into flash (in descending order of priority):
 #if !defined(AIORACERF3)
 #undef USE_GYRO_OVERFLOW_CHECK
-//#undef USE_GYRO_LPF2
+#undef USE_GYRO_LPF2
 
-//#undef USE_RC_SMOOTHING_FILTER
-//#undef ITERM_RELAX
+#undef USE_RC_SMOOTHING_FILTER
+#undef ITERM_RELAX
 
 #undef USE_MSP_DISPLAYPORT
 #undef USE_MSP_OVER_TELEMETRY

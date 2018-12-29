@@ -29,6 +29,7 @@
 //#undef USE_GYRO_LPF2
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 //#undef USE_ITERM_RELAX
 //#undef USE_RC_SMOOTHING_FILTER
 =======
@@ -38,6 +39,10 @@
 #undef USE_ITERM_RELAX
 #undef USE_RC_SMOOTHING_FILTER
 >>>>>>> upstream/master
+=======
+#undef USE_ITERM_RELAX
+#undef USE_RC_SMOOTHING_FILTER
+>>>>>>> parent of 0f1496e70... Performanc Edition Edits
 
 #undef USE_HUFFMAN
 #undef USE_PINIO
