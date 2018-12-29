@@ -99,8 +99,8 @@
 #if !defined(PIRXF4)
 #define USE_BARO
 #define USE_BARO_SPI_LPS
-#define LPS_SPI_INSTANCE SPI3
-#define LPS_CS_PIN PB8
+#define BARO_SPI_INSTANCE       SPI3
+#define BARO_CS_PIN             PB8
 #endif
 
 //UARTs
@@ -176,7 +176,6 @@
 #define USE_ADC
 #define DEFAULT_VOLTAGE_METER_SOURCE VOLTAGE_METER_ADC
 #define DEFAULT_CURRENT_METER_SOURCE CURRENT_METER_ADC
-#define BOARD_HAS_VOLTAGE_DIVIDER
 #if defined(PIRXF4)
 #define VBAT_ADC_PIN            PC2
 #define RSSI_ADC_PIN            PC1

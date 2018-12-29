@@ -44,9 +44,9 @@
 
 #define USE_DUAL_GYRO
 #define USE_EXTI
+#define USE_GYRO_EXTI
 #define GYRO_1_EXTI_PIN         PC4
 #define GYRO_2_EXTI_PIN         PC3
-#define MPU_INT_EXTI
 
 #define GYRO_1_CS_PIN           PB2
 #define GYRO_1_SPI_INSTANCE     SPI1
@@ -121,6 +121,11 @@
 
 #define SDCARD_DMA_STREAM_TX_FULL           DMA1_Stream5
 #define SDCARD_DMA_CHANNEL                  0
+
+#define USE_FLASHFS
+#define USE_FLASH_M25P16
+#define FLASH_SPI_INSTANCE      SPI3
+#define FLASH_CS_PIN            PD2
 
 // *************** UART *****************************
 

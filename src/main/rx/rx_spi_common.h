@@ -18,16 +18,22 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdbool.h>
-#include <stdint.h>
-#include "drivers/io.h"
-#include "drivers/bus_i2c.h"
-#include "drivers/bus_spi.h"
+#pragma once
 
-void targetPreInit(void)
-{
-    IO_t osdChSwitch = IOGetByTag(IO_TAG(OSD_CH_SWITCH));
-    IOInit(osdChSwitch, OWNER_SYSTEM, 0);
-    IOConfigGPIO(osdChSwitch, IOCFG_OUT_PP);
-    IOLo(osdChSwitch);
-}
+#include "rx/rx_spi.h"
+
+#define INTERVAL_RX_LOSS_MS 1000
+#define INTERVAL_RX_BIND_MS 250
+#define RX_LOSS_COUNT 1000
+
+void rxSpiCommonIOInit(const rxSpiConfig_t *rxSpiConfig);
+
+void rxSpiLedOn(void);
+void rxSpiLedOff(void);
+void rxSpiLedToggle(void);
+void rxSpiLedBlink(timeMs_t blinkMs);
+void rxSpiLedBlinkRxLoss(rx_spi_received_e result);
+void rxSpiLedBlinkBind(void);
+
+void rxSpiBind(void);
+bool rxSpiCheckBindRequested(bool reset);

@@ -164,7 +164,7 @@ TEST(TelemetryCrsfTest, TestBattery)
     EXPECT_EQ(67, remaining);
     EXPECT_EQ(crfsCrc(frame, frameLen), frame[11]);
 
-    testBatteryVoltage = 33; // 3.3V = 3300 mv
+    testBatteryVoltage = 330; // 3.3V = 3300 mv
     testAmperage = 2960; // = 29.60A = 29600mA - amperage is in 0.01A steps
     testmAhDrawn = 1234;
     frameLen = getCrsfFrame(frame, CRSF_FRAMETYPE_BATTERY_SENSOR);
@@ -323,6 +323,10 @@ uint16_t getBatteryVoltage(void) {
     return testBatteryVoltage;
 }
 
+uint16_t getLegacyBatteryVoltage(void) {
+    return (testBatteryVoltage + 5) / 10;
+}
+
 uint16_t getBatteryAverageCellVoltage(void) {
     return 0;
 }
@@ -344,7 +348,7 @@ int32_t getMAhDrawn(void){
 }
 
 bool sendMspReply(uint8_t, mspResponseFnPtr) { return false; }
-bool handleMspFrame(uint8_t *, int)  { return false; }
+bool handleMspFrame(uint8_t *, int, uint8_t *)  { return false; }
 void crsfScheduleMspResponse(void) {};
 bool isBatteryVoltageConfigured(void) { return true; }
 bool isAmperageConfigured(void) { return true; }

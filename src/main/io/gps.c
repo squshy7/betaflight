@@ -78,9 +78,12 @@ int32_t GPS_home[2];
 uint16_t GPS_distanceToHome;        // distance to home point in meters
 int16_t GPS_directionToHome;        // direction to home or hol point in degrees
 uint32_t GPS_distanceFlownInCm;     // distance flown since armed in centimeters
+int16_t GPS_verticalSpeedInCmS;     // vertical speed in cm/s
 float dTnav;             // Delta Time in milliseconds for navigation computations, updated with every good GPS read
 int16_t nav_takeoff_bearing;
 navigationMode_e nav_mode = NAV_MODE_NONE;    // Navigation mode
+
+#define GPS_DISTANCE_FLOWN_MIN_GROUND_SPEED_THRESHOLD_CM_S 15 // 5.4Km/h 3.35mph
 
 // moving average filter variables
 #define GPS_FILTERING              1    // add a 5 element moving average filter to GPS coordinates, helps eliminate gps noise but adds latency
@@ -543,6 +546,9 @@ void gpsUpdate(timeUs_t currentTimeUs)
     }
     if (sensors(SENSOR_GPS)) {
         updateGpsIndicator(currentTimeUs);
+    }
+    if (!ARMING_FLAG(ARMED)) {
+        DISABLE_STATE(GPS_FIX_HOME);
     }
 #if defined(USE_GPS_RESCUE)
     if (gpsRescueIsConfigured()) {
@@ -1272,7 +1278,6 @@ void GPS_reset_home_position(void)
         GPS_home[LAT] = gpsSol.llh.lat;
         GPS_home[LON] = gpsSol.llh.lon;
         GPS_calc_longitude_scaling(gpsSol.llh.lat); // need an initial value for distance and bearing calc
-        GPS_distanceFlownInCm = 0;
         // Set ground altitude
         ENABLE_STATE(GPS_FIX_HOME);
     }
@@ -1314,24 +1319,30 @@ void GPS_calculateDistanceAndDirectionToHome(void)
 static void GPS_calculateDistanceFlown(bool initialize)
 {
     static int32_t lastCoord[2] = { 0, 0 };
-    static int32_t lastMillis = 0;
+    static int16_t lastAlt;
+    static int32_t lastMillis;
+
+    int currentMillis = millis();
 
     if (initialize) {
-        lastMillis = millis();
+        GPS_distanceFlownInCm = 0;
+        GPS_verticalSpeedInCmS = 0;
     } else {
-        int32_t currentMillis = millis();
-        // update the calculation less frequently when accuracy is low, to mitigate adding up error
-        if ((currentMillis - lastMillis) > (10 * constrain(gpsSol.hdop, 100, 1000))) {
+        // Only add up movement when speed is faster than minimum threshold
+        if (gpsSol.groundSpeed > GPS_DISTANCE_FLOWN_MIN_GROUND_SPEED_THRESHOLD_CM_S) {
             uint32_t dist;
             int32_t dir;
             GPS_distance_cm_bearing(&gpsSol.llh.lat, &gpsSol.llh.lon, &lastCoord[LAT], &lastCoord[LON], &dist, &dir);
             GPS_distanceFlownInCm += dist;
-            lastMillis = currentMillis;
         }
-    }
 
+        GPS_verticalSpeedInCmS = (gpsSol.llh.altCm - lastAlt) * 1000 / (currentMillis - lastMillis);
+        GPS_verticalSpeedInCmS = constrain(GPS_verticalSpeedInCmS, -1500.0f, 1500.0f);
+    }
     lastCoord[LON] = gpsSol.llh.lon;
     lastCoord[LAT] = gpsSol.llh.lat;
+    lastAlt = gpsSol.llh.altCm;
+    lastMillis = currentMillis;
 }
 
 void onGpsNewData(void)
@@ -1339,9 +1350,6 @@ void onGpsNewData(void)
     if (!(STATE(GPS_FIX) && gpsSol.numSat >= 5)) {
         return;
     }
-
-    if (!ARMING_FLAG(ARMED))
-        DISABLE_STATE(GPS_FIX_HOME);
 
     if (!STATE(GPS_FIX_HOME) && ARMING_FLAG(ARMED)) {
         GPS_reset_home_position();

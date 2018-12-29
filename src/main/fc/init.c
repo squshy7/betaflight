@@ -58,6 +58,7 @@
 #include "drivers/light_led.h"
 #include "drivers/mco.h"
 #include "drivers/nvic.h"
+#include "drivers/persistent.h"
 #include "drivers/pwm_esc_detect.h"
 #include "drivers/pwm_output.h"
 #include "drivers/rx/rx_pwm.h"
@@ -88,6 +89,10 @@
 
 #include "interface/cli.h"
 #include "interface/msp.h"
+
+#ifdef USE_PERSISTENT_MSC_RTC
+#include "msc/usbd_storage.h"
+#endif
 
 #include "msp/msp_serial.h"
 
@@ -296,12 +301,6 @@ void init(void)
     }
 #endif
 
-    // Configure MCO output after config is stable
-
-#ifdef USE_MCO
-    mcoInit(mcoConfig());
-#endif
-
     // Note that spektrumBind checks if a call is immediately after
     // hard reset (including power cycle), so it should be called before
     // systemClockSetHSEValue and OverclockRebootIfNecessary, as these
@@ -330,6 +329,11 @@ void init(void)
 
 #ifdef USE_OVERCLOCK
     OverclockRebootIfNecessary(systemConfig()->cpu_overclock);
+#endif
+
+    // Configure MCO output after config is stable
+#ifdef USE_MCO
+    mcoInit(mcoConfig());
 #endif
 
     timerInit();  // timer must be initialized before any channel is allocated
@@ -393,13 +397,13 @@ void init(void)
 
 #ifdef TARGET_BUS_INIT
     targetBusInit();
+
 #else
 
 #ifdef USE_SPI
     spiPinConfigure(spiPinConfig(0));
 
-    // Initialize CS lines and keep them high
-    spiPreInit();
+    spiPreinit();
 
 #ifdef USE_SPI_DEVICE_1
     spiInit(SPIDEV_1);
@@ -426,6 +430,12 @@ void init(void)
              NVIC_SystemReset();
         }
     }
+#endif
+
+#ifdef USE_PERSISTENT_MSC_RTC
+    // if we didn't enter MSC mode then clear the persistent RTC value
+    persistentObjectWrite(PERSISTENT_OBJECT_RTC_HIGH, 0);
+    persistentObjectWrite(PERSISTENT_OBJECT_RTC_LOW, 0);
 #endif
 
 #ifdef USE_I2C
@@ -492,7 +502,9 @@ void init(void)
 
     if (!sensorsAutodetect()) {
         // if gyro was not detected due to whatever reason, notify and don't arm.
-        indicateFailure(FAILURE_MISSING_ACC, 2);
+        if (isSystemConfigured()) {
+            indicateFailure(FAILURE_MISSING_ACC, 2);
+        }
         setArmingDisabled(ARMING_DISABLED_NO_GYRO);
     }
 
@@ -643,7 +655,7 @@ void init(void)
 #endif
 
 #ifdef USE_FLASHFS
-#if defined(USE_FLASH)
+#if defined(USE_FLASH_CHIP)
     flashInit(flashConfig());
 #endif
     flashfsInit();

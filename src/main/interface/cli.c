@@ -140,9 +140,7 @@ extern uint8_t __config_end;
 
 #include "rx/rx.h"
 #include "rx/spektrum.h"
-#include "rx/cc2500_frsky_common.h"
-#include "rx/cc2500_frsky_x.h"
-#include "rx/cc2500_common.h"
+#include "rx/rx_spi_common.h"
 
 #include "scheduler/scheduler.h"
 
@@ -610,7 +608,11 @@ static void cliPrintVarRange(const clivalue_t *var)
 {
     switch (var->type & VALUE_MODE_MASK) {
     case (MODE_DIRECT): {
-        cliPrintLinef("Allowed range: %d - %d", var->config.minmax.min, var->config.minmax.max);
+        if ((var->type & VALUE_TYPE_MASK) == VAR_UINT32) {
+            cliPrintLinef("Allowed range: %d - %d", 0, var->config.u32_max);
+        } else {
+            cliPrintLinef("Allowed range: %d - %d", var->config.minmax.min, var->config.minmax.max);
+        }
     }
     break;
     case (MODE_LOOKUP): {
@@ -2597,21 +2599,35 @@ static void cliBeeper(char *cmdline)
 #endif
 
 #ifdef USE_RX_SPI
-void cliRxBind(char *cmdline){
+void cliRxSpiBind(char *cmdline){
     UNUSED(cmdline);
     switch (rxSpiConfig()->rx_spi_protocol) {
-#ifdef USE_RX_CC2500_BIND
+    default:
+        cliPrint("Not supported.");
+        break;
+#if defined(USE_RX_FRSKY_SPI)
+#if defined(USE_RX_FRSKY_SPI_D)
     case RX_SPI_FRSKY_D:
+#endif
+#if defined(USE_RX_FRSKY_SPI_X)
     case RX_SPI_FRSKY_X:
+#endif
+#endif // USE_RX_FRSKY_SPI
+#ifdef USE_RX_SFHSS_SPI
     case RX_SPI_SFHSS:
-        cc2500SpiBind();
+#endif
+#ifdef USE_RX_FLYSKY
+    case RX_SPI_A7105_FLYSKY:
+    case RX_SPI_A7105_FLYSKY_2A:
+#endif
+#ifdef USE_RX_SPEKTRUM
+    case RX_SPI_CYRF6936_DSM:
+#endif
+#if defined(USE_RX_FRSKY_SPI) || defined(USE_RX_SFHSS_SPI) || defined(USE_RX_FLYSKY) || defined(USE_RX_SPEKTRUM)
+        rxSpiBind();
         cliPrint("Binding...");
         break;
 #endif
-    default:
-        cliPrint("Not supported.");
-
-        break;
     }
 }
 #endif
@@ -3579,20 +3595,9 @@ static void cliStatus(char *cmdline)
 {
     UNUSED(cmdline);
 
-    cliPrintLinef("System Uptime: %d seconds", millis() / 1000);
+    // MCU type, clock, vrefint, core temperature
 
-    #ifdef USE_RTC_TIME
-    char buf[FORMATTED_DATE_TIME_BUFSIZE];
-    dateTime_t dt;
-    if (rtcGetDateTime(&dt)) {
-        dateTimeFormatLocal(buf, &dt);
-        cliPrintLinef("Current Time: %s", buf);
-    }
-    #endif
-
-    cliPrintLinef("Voltage: %d * 0.1V (%dS battery - %s)", getBatteryVoltage(), getBatteryCellCount(), getBatteryStateString());
-
-    cliPrintf("CPU Clock=%dMHz", (SystemCoreClock / 1000000));
+    cliPrintf("MCU %s Clock=%dMHz", MCU_TYPE_NAME, (SystemCoreClock / 1000000));
 
 #ifdef STM32F4
     // Only F4 is capable of switching between HSE/HSI (for now)
@@ -3613,8 +3618,27 @@ static void cliStatus(char *cmdline)
 #ifdef USE_ADC_INTERNAL
     uint16_t vrefintMv = getVrefMv();
     int16_t coretemp = getCoreTemperatureCelsius();
-    cliPrintf(", Vref=%d.%2dV, Core temp=%ddegC", vrefintMv / 1000, (vrefintMv % 1000) / 10, coretemp);
+    cliPrintLinef(", Vref=%d.%2dV, Core temp=%ddegC", vrefintMv / 1000, (vrefintMv % 1000) / 10, coretemp);
+#else
+    cliPrintLinefeed();
 #endif
+
+    // Stack and config sizes and usages
+
+    cliPrintf("Stack size: %d, Stack address: 0x%x", stackTotalSize(), stackHighMem());
+#ifdef STACK_CHECK
+    cliPrintf(", Stack used: %d", stackUsedSize());
+#endif
+    cliPrintLinefeed();
+
+#ifdef EEPROM_IN_RAM
+#define CONFIG_SIZE EEPROM_SIZE
+#else
+#define CONFIG_SIZE (&__config_end - &__config_start)
+#endif
+    cliPrintLinef("Config size: %d, Max available config: %d", getEEPROMConfigSize(), CONFIG_SIZE);
+
+    // Sensors
 
 #if defined(USE_SENSOR_NAMES)
     const uint32_t detectedSensorsMask = sensorsMask();
@@ -3626,41 +3650,57 @@ static void cliStatus(char *cmdline)
         if ((detectedSensorsMask & mask) && (mask & SENSOR_NAMES_MASK)) {
             const uint8_t sensorHardwareIndex = detectedSensors[i];
             const char *sensorHardware = sensorHardwareNames[i][sensorHardwareIndex];
-            cliPrintf(", %s=%s", sensorTypeNames[i], sensorHardware);
+            if (i) {
+                cliPrint(", ");
+            }
+            cliPrintf("%s=%s", sensorTypeNames[i], sensorHardware);
             if (mask == SENSOR_ACC && acc.dev.revisionCode) {
                 cliPrintf(".%c", acc.dev.revisionCode);
             }
         }
     }
+    cliPrintLinefeed();
 #endif /* USE_SENSOR_NAMES */
+
+    // Uptime and wall clock
+
+    cliPrintf("System Uptime: %d seconds", millis() / 1000);
+
+#ifdef USE_RTC_TIME
+    char buf[FORMATTED_DATE_TIME_BUFSIZE];
+    dateTime_t dt;
+    if (rtcGetDateTime(&dt)) {
+        dateTimeFormatLocal(buf, &dt);
+        cliPrintf(", Current Time: %s", buf);
+    }
+#endif
     cliPrintLinefeed();
 
-#ifdef USE_SDCARD
-    cliSdInfo(NULL);
-#endif
-
-#ifdef USE_I2C
-    const uint16_t i2cErrorCounter = i2cGetErrorCounter();
-#else
-    const uint16_t i2cErrorCounter = 0;
-#endif
-
-#ifdef STACK_CHECK
-    cliPrintf("Stack used: %d, ", stackUsedSize());
-#endif
-    cliPrintLinef("Stack size: %d, Stack address: 0x%x", stackTotalSize(), stackHighMem());
-#ifdef EEPROM_IN_RAM
-#define CONFIG_SIZE EEPROM_SIZE
-#else
-#define CONFIG_SIZE (&__config_end - &__config_start)
-#endif
-    cliPrintLinef("I2C Errors: %d, config size: %d, max available config: %d", i2cErrorCounter, getEEPROMConfigSize(), CONFIG_SIZE);
+    // Run status
 
     const int gyroRate = getTaskDeltaTime(TASK_GYROPID) == 0 ? 0 : (int)(1000000.0f / ((float)getTaskDeltaTime(TASK_GYROPID)));
     const int rxRate = currentRxRefreshRate == 0 ? 0 : (int)(1000000.0f / ((float)currentRxRefreshRate));
     const int systemRate = getTaskDeltaTime(TASK_SYSTEM) == 0 ? 0 : (int)(1000000.0f / ((float)getTaskDeltaTime(TASK_SYSTEM)));
     cliPrintLinef("CPU:%d%%, cycle time: %d, GYRO rate: %d, RX rate: %d, System rate: %d",
             constrain(averageSystemLoadPercent, 0, 100), getTaskDeltaTime(TASK_GYROPID), gyroRate, rxRate, systemRate);
+
+    // Battery meter
+
+    cliPrintLinef("Voltage: %d * 0.01V (%dS battery - %s)", getBatteryVoltage(), getBatteryCellCount(), getBatteryStateString());
+
+    // Other devices and status
+
+#ifdef USE_I2C
+    const uint16_t i2cErrorCounter = i2cGetErrorCounter();
+#else
+    const uint16_t i2cErrorCounter = 0;
+#endif
+    cliPrintLinef("I2C Errors: %d", i2cErrorCounter);
+
+#ifdef USE_SDCARD
+    cliSdInfo(NULL);
+#endif
+
     cliPrint("Arming disable flags:");
     armingDisableFlags_e flags = getArmingDisableFlags();
     while (flags) {
@@ -3895,23 +3935,21 @@ const cliResourceValue_t resourceTable[] = {
 #if defined(USE_USB_MSC)
     DEFS( OWNER_USB_MSC_PIN,   PG_USB_CONFIG, usbDev_t, mscButtonPin ),
 #endif
-#ifdef USE_FLASH
+#ifdef USE_FLASH_CHIP
     DEFS( OWNER_FLASH_CS,      PG_FLASH_CONFIG, flashConfig_t, csTag ),
 #endif
 #ifdef USE_MAX7456
     DEFS( OWNER_OSD_CS,        PG_MAX7456_CONFIG, max7456Config_t, csTag ),
 #endif
-#ifdef USE_SPI
-    DEFA( OWNER_SPI_PREINIT_IPU, PG_SPI_PREINIT_IPU_CONFIG, spiCs_t, csnTag, SPI_PREINIT_IPU_COUNT ),
-    DEFA( OWNER_SPI_PREINIT_OPU, PG_SPI_PREINIT_OPU_CONFIG, spiCs_t, csnTag, SPI_PREINIT_OPU_COUNT ),
-#endif
 #ifdef USE_RX_SPI
     DEFS( OWNER_RX_SPI_CS,     PG_RX_SPI_CONFIG, rxSpiConfig_t, csnTag ),
+    DEFS( OWNER_RX_SPI_BIND,   PG_RX_SPI_CONFIG, rxSpiConfig_t, bindIoTag ),
+    DEFS( OWNER_RX_SPI_LED,    PG_RX_SPI_CONFIG, rxSpiConfig_t, ledIoTag ),
 #endif
 #ifdef USE_GYRO_EXTI
-    DEFW( OWNER_GYRO_EXTI,     PG_GYRO_DEVICE_CONFIG, gyroDeviceConfig_t, extiTag, 2 ),
+    DEFW( OWNER_GYRO_EXTI,     PG_GYRO_DEVICE_CONFIG, gyroDeviceConfig_t, extiTag, MAX_GYRODEV_COUNT ),
 #endif
-    DEFW( OWNER_GYRO_CS,       PG_GYRO_DEVICE_CONFIG, gyroDeviceConfig_t, csnTag, 2 ),
+    DEFW( OWNER_GYRO_CS,       PG_GYRO_DEVICE_CONFIG, gyroDeviceConfig_t, csnTag, MAX_GYRODEV_COUNT ),
 #ifdef USE_USB_DETECT
     DEFS( OWNER_USB_DETECT,    PG_USB_CONFIG, usbDev_t, detectPin ),
 #endif
@@ -3943,23 +3981,24 @@ static void printResource(uint8_t dumpMask)
         }
 
         for (int index = 0; index < MAX_RESOURCE_INDEX(resourceTable[i].maxIndex); index++) {
-            const ioTag_t ioTag = *((const uint8_t *)currentConfig + resourceTable[i].stride * index + resourceTable[i].offset);
-            const ioTag_t ioTagDefault = *((const uint8_t *)defaultConfig + resourceTable[i].stride * index + resourceTable[i].offset);
+            const ioTag_t ioTag = *(ioTag_t *)((const uint8_t *)currentConfig + resourceTable[i].stride * index + resourceTable[i].offset);
+            ioTag_t ioTagDefault = NULL;
+            if (defaultConfig) {
+                ioTagDefault = *(ioTag_t *)((const uint8_t *)defaultConfig + resourceTable[i].stride * index + resourceTable[i].offset);
+            }
 
-            bool equalsDefault = ioTag == ioTagDefault;
+            const bool equalsDefault = ioTag == ioTagDefault;
             const char *format = "resource %s %d %c%02d";
             const char *formatUnassigned = "resource %s %d NONE";
-            if (!ioTagDefault) {
-                cliDefaultPrintLinef(dumpMask, equalsDefault, formatUnassigned, owner, RESOURCE_INDEX(index));
-            } else {
+            if (ioTagDefault) {
                 cliDefaultPrintLinef(dumpMask, equalsDefault, format, owner, RESOURCE_INDEX(index), IO_GPIOPortIdxByTag(ioTagDefault) + 'A', IO_GPIOPinIdxByTag(ioTagDefault));
+            } else if (defaultConfig) {
+                cliDefaultPrintLinef(dumpMask, equalsDefault, formatUnassigned, owner, RESOURCE_INDEX(index));
             }
-            if (!ioTag) {
-                if (!(dumpMask & HIDE_UNUSED)) {
-                    cliDumpPrintLinef(dumpMask, equalsDefault, formatUnassigned, owner, RESOURCE_INDEX(index));
-                }
-            } else {
+            if (ioTag) {
                 cliDumpPrintLinef(dumpMask, equalsDefault, format, owner, RESOURCE_INDEX(index), IO_GPIOPortIdxByTag(ioTag) + 'A', IO_GPIOPinIdxByTag(ioTag));
+            } else if (!(dumpMask & HIDE_UNUSED)) {
+                cliDumpPrintLinef(dumpMask, equalsDefault, formatUnassigned, owner, RESOURCE_INDEX(index));
             }
         }
     }
@@ -4449,16 +4488,27 @@ static void cliDiff(char *cmdline)
 #if defined(USE_USB_MSC)
 static void cliMsc(char *cmdline)
 {
-    UNUSED(cmdline);
-
     if (mscCheckFilesystemReady()) {
+#ifdef USE_RTC_TIME
+        int timezoneOffsetMinutes = timeConfig()->tz_offsetMinutes;
+        if (!isEmpty(cmdline)) {
+            timezoneOffsetMinutes = atoi(cmdline);
+            if ((timezoneOffsetMinutes < TIMEZONE_OFFSET_MINUTES_MIN) || (timezoneOffsetMinutes > TIMEZONE_OFFSET_MINUTES_MAX)) {
+                cliPrintErrorLinef("INVALID TIMEZONE OFFSET");
+                return;
+            }
+        }
+#else
+        int timezoneOffsetMinutes = 0;
+        UNUSED(cmdline);
+#endif
         cliPrintHashLine("Restarting in mass storage mode");
         cliPrint("\r\nRebooting");
         bufWriterFlush(cliWriter);
         waitForSerialPortToFinishTransmitting(cliPort);
         stopPwmAllMotors();
 
-        systemResetToMsc();
+        systemResetToMsc(timezoneOffsetMinutes);
     } else {
         cliPrintHashLine("Storage not present or failed to initialize!");
     }
@@ -4504,6 +4554,9 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("beeper", "enable/disable beeper for a condition", "list\r\n"
         "\t<->[name]", cliBeeper),
 #endif // USE_BEEPER
+#ifdef USE_RX_SPI
+        CLI_COMMAND_DEF("bind_rx_spi", "initiate binding for RX SPI", NULL, cliRxSpiBind),
+#endif
     CLI_COMMAND_DEF("bl", "reboot into bootloader", NULL, cliBootloader),
 #if defined(USE_BOARD_INFO)
     CLI_COMMAND_DEF("board_name", "get / set the name of the board model", "[board name]", cliBoardName),
@@ -4536,9 +4589,6 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("flash_write", NULL, "<address> <message>", cliFlashWrite),
 #endif
 #endif
-#ifdef USE_RX_CC2500_BIND
-    CLI_COMMAND_DEF("bind", "initiate binding for RX", NULL, cliRxBind),
-#endif
     CLI_COMMAND_DEF("get", "get variable value", "[name]", cliGet),
 #ifdef USE_GPS
     CLI_COMMAND_DEF("gpspassthrough", "passthrough gps to serial", NULL, cliGpsPassthrough),
@@ -4564,7 +4614,11 @@ const clicmd_t cmdTable[] = {
 #endif
     CLI_COMMAND_DEF("motor",  "get/set motor", "<index> [<value>]", cliMotor),
 #ifdef USE_USB_MSC
+#ifdef USE_RTC_TIME
+    CLI_COMMAND_DEF("msc", "switch into msc mode", "[<timezone offset minutes>]", cliMsc),
+#else
     CLI_COMMAND_DEF("msc", "switch into msc mode", NULL, cliMsc),
+#endif
 #endif
     CLI_COMMAND_DEF("name", "name of craft", NULL, cliName),
 #ifndef MINIMAL_CLI

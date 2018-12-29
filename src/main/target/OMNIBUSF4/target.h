@@ -73,8 +73,6 @@
 
 #define USE_EXTI
 
-#define USE_MULTI_GYRO
-
 #define USE_ACC
 #define USE_ACC_SPI_MPU6000
 
@@ -124,8 +122,8 @@
 #define USE_BARO
 #if defined(OMNIBUSF4SD)
 #define USE_BARO_SPI_BMP280
-#define BMP280_SPI_INSTANCE     SPI3
-#define BMP280_CS_PIN           PB3 // v1
+#define BARO_SPI_INSTANCE       SPI3
+#define BARO_CS_PIN             PB3 // v1
 #endif
 #define USE_BARO_BMP085
 #define USE_BARO_BMP280
