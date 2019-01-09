@@ -27,22 +27,17 @@
 // NOTE: Don't disable USE_GYRO_OVERFLOW_CHECK - board has ICM20602 gyro
 //#undef USE_GYRO_OVERFLOW_CHECK
 //#undef USE_GYRO_LPF2
-
-<<<<<<< HEAD
-<<<<<<< HEAD
 //#undef USE_ITERM_RELAX
 //#undef USE_RC_SMOOTHING_FILTER
-=======
+
 #undef USE_MSP_DISPLAYPORT
 #undef USE_MSP_OVER_TELEMETRY
 
 #undef USE_ITERM_RELAX
 #undef USE_RC_SMOOTHING_FILTER
->>>>>>> upstream/master
-=======
+
 #undef USE_ITERM_RELAX
 #undef USE_RC_SMOOTHING_FILTER
->>>>>>> parent of 0f1496e70... Performanc Edition Edits
 
 #undef USE_HUFFMAN
 #undef USE_PINIO

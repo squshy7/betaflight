@@ -193,22 +193,13 @@
 #define USE_ESC_SENSOR_INFO
 #define USE_CRSF_CMS_TELEMETRY
 #define USE_BOARD_INFO
-<<<<<<< HEAD
-<<<<<<< HEAD
-//#define USE_SMART_FEEDFORWARD
-=======
-=======
->>>>>>> parent of 0f1496e70... Performanc Edition Edits
 #define USE_SMART_FEEDFORWARD
 #define USE_THROTTLE_BOOST
 #define USE_RC_SMOOTHING_FILTER
 #define USE_ITERM_RELAX
 #define USE_DYN_LPF
-<<<<<<< HEAD
 #define USE_INTEGRATED_YAW_CONTROL
->>>>>>> upstream/master
-=======
->>>>>>> parent of 0f1496e70... Performanc Edition Edits
+
 
 #ifdef USE_SERIALRX_SPEKTRUM
 #define USE_SPEKTRUM_BIND
