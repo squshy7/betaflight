@@ -410,7 +410,7 @@ void init(void)
         if (mscStart() == 0) {
              mscWaitForButton();
         } else {
-             NVIC_SystemReset();
+            systemResetFromMsc();
         }
     }
 #endif
@@ -645,6 +645,7 @@ void init(void)
     flashfsInit();
 #endif
 
+#ifdef USE_BLACKBOX
 #ifdef USE_SDCARD
     if (blackboxConfig()->device == BLACKBOX_DEVICE_SDCARD) {
         if (sdcardConfig()->enabled) {
@@ -656,8 +657,6 @@ void init(void)
         }
     }
 #endif
-
-#ifdef USE_BLACKBOX
     blackboxInit();
 #endif
 

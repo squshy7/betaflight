@@ -155,6 +155,7 @@ static escSensorData_t *escDataCombined;
 #define AH_SIDEBAR_WIDTH_POS 7
 #define AH_SIDEBAR_HEIGHT_POS 3
 
+#ifdef USE_CMS
 static const char compassBar[] = {
   SYM_HEADING_W,
   SYM_HEADING_LINE, SYM_HEADING_DIVIDED_LINE, SYM_HEADING_LINE,
@@ -202,6 +203,7 @@ static const uint8_t osdElementDisplayOrder[] = {
     OSD_COMPASS_BAR,
     OSD_ANTI_GRAVITY
 };
+#endif // USE_CMS
 
 PG_REGISTER_WITH_RESET_FN(osdConfig_t, osdConfig, PG_OSD_CONFIG, 3);
 
@@ -218,6 +220,7 @@ static char osdGetMetersToSelectedUnitSymbol(void)
     }
 }
 
+#ifdef USE_CMS
 /**
  * Gets average battery cell voltage in 0.01V units.
  */
@@ -236,6 +239,7 @@ static char osdGetBatterySymbol(int cellVoltage)
         return SYM_BATT_EMPTY - constrain(symOffset, 0, 6);
     }
 }
+#endif
 
 /**
  * Converts altitude based on the current unit system.
@@ -252,13 +256,13 @@ static int32_t osdGetMetersToSelectedUnit(int32_t meters)
 }
 
 #if defined(USE_ADC_INTERNAL) || defined(USE_ESC_SENSOR)
-STATIC_UNIT_TESTED int osdConvertTemperatureToSelectedUnit(int tempInDeciDegrees)
+STATIC_UNIT_TESTED int osdConvertTemperatureToSelectedUnit(int tempInDegreesCelcius)
 {
     switch (osdConfig()->units) {
     case OSD_UNIT_IMPERIAL:
-        return ((tempInDeciDegrees * 9) / 5) + 320;
+        return lrintf(((tempInDegreesCelcius * 9.0f) / 5) + 32);
     default:
-        return tempInDeciDegrees;
+        return tempInDegreesCelcius;
     }
 }
 
@@ -282,6 +286,7 @@ static void osdFormatAltitudeString(char * buff, int altitude)
     buff[4] = '.';
 }
 
+#ifdef USE_CMS
 static void osdFormatPID(char * buff, const char * label, const pidf_t * pid)
 {
     tfp_sprintf(buff, "%s %3d %3d %3d", label, pid->P, pid->I, pid->D);
@@ -313,6 +318,7 @@ static uint8_t osdGetDirectionSymbolFromHeading(int heading)
 
     return SYM_ARROW_SOUTH + heading;
 }
+#endif
 
 static char osdGetTimerSymbol(osd_timer_source_e src)
 {
@@ -373,6 +379,7 @@ STATIC_UNIT_TESTED void osdFormatTimer(char *buff, bool showSymbol, bool usePrec
     osdFormatTime(buff, (usePrecision ? OSD_TIMER_PRECISION(timer) : OSD_TIMER_PREC_SECOND), osdGetTimerValue(src));
 }
 
+#ifdef USE_CMS
 #ifdef USE_GPS
 static void osdFormatCoordinate(char *buff, char sym, int32_t val)
 {
@@ -395,6 +402,17 @@ static void osdFormatCoordinate(char *buff, char sym, int32_t val)
 }
 #endif // USE_GPS
 
+static void osdFormatMessage(char *buff, size_t size, const char *message)
+{
+    memset(buff, SYM_BLANK, size);
+    if (message) {
+        memcpy(buff, message, strlen(message));
+    }
+    // Ensure buff is zero terminated
+    buff[size - 1] = '\0';
+}
+#endif // USE_CMS
+
 #ifdef USE_RTC_TIME
 static bool osdFormatRtcDateTime(char *buffer)
 {
@@ -410,16 +428,6 @@ static bool osdFormatRtcDateTime(char *buffer)
     return true;
 }
 #endif
-
-static void osdFormatMessage(char *buff, size_t size, const char *message)
-{
-    memset(buff, SYM_BLANK, size);
-    if (message) {
-        memcpy(buff, message, strlen(message));
-    }
-    // Ensure buff is zero terminated
-    buff[size - 1] = '\0';
-}
 
 void osdStatSetState(uint8_t statIndex, bool enabled)
 {
@@ -449,6 +457,7 @@ bool osdWarnGetState(uint8_t warningIndex)
     return osdConfig()->enabledWarnings & (1 << warningIndex);
 }
 
+#ifdef USE_CMS
 static bool osdDrawSingleElement(uint8_t item)
 {
     if (!VISIBLE(osdConfig()->item_pos[item]) || BLINK(item)) {
@@ -553,7 +562,26 @@ static bool osdDrawSingleElement(uint8_t item)
         break;
 
     case OSD_ALTITUDE:
-        osdFormatAltitudeString(buff, getEstimatedAltitude());
+        {
+            bool haveBaro = false;
+            bool haveGps = false;
+#ifdef USE_BARO
+            haveBaro = sensors(SENSOR_BARO);
+#endif
+#ifdef USE_GPS
+            haveGps = sensors(SENSOR_GPS) && STATE(GPS_FIX);
+#endif
+            if (haveBaro || haveGps) {
+                osdFormatAltitudeString(buff, getEstimatedAltitude());
+            } else {
+                // We use this symbol when we don't have a valid measure
+                buff[0] = SYM_COLON;
+                // overwrite any previous altitude with blanks
+                memset(buff + 1, SYM_BLANK, 6);
+                buff[7] = '\0';
+            }
+        }
+
         break;
 
     case OSD_ITEM_TIMER_1:
@@ -763,6 +791,12 @@ static bool osdDrawSingleElement(uint8_t item)
             }
 #endif
 
+            // Warn when in flip over after crash mode
+            if (osdWarnGetState(OSD_WARNING_CRASH_FLIP) && isFlipOverAfterCrashMode()) {
+                osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "CRASH FLIP");
+                break;
+            }
+
             if (osdWarnGetState(OSD_WARNING_BATTERY_CRITICAL) && batteryState == BATTERY_CRITICAL) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, " LAND NOW");
                 break;
@@ -775,10 +809,10 @@ static bool osdDrawSingleElement(uint8_t item)
             }
 
 #ifdef USE_ADC_INTERNAL
-            uint8_t coreTemperature = getCoreTemperatureCelsius();
+            const int16_t coreTemperature = getCoreTemperatureCelsius();
             if (osdWarnGetState(OSD_WARNING_CORE_TEMPERATURE) && coreTemperature >= osdConfig()->core_temp_alarm) {
                 char coreTemperatureWarningMsg[OSD_FORMAT_MESSAGE_BUFFER_SIZE];
-                tfp_sprintf(coreTemperatureWarningMsg, "CORE: %3d%c", osdConvertTemperatureToSelectedUnit(getCoreTemperatureCelsius() * 10) / 10, osdGetTemperatureSymbolForSelectedUnit());
+                tfp_sprintf(coreTemperatureWarningMsg, "CORE: %3d%c", osdConvertTemperatureToSelectedUnit(coreTemperature), osdGetTemperatureSymbolForSelectedUnit());
 
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, coreTemperatureWarningMsg);
 
@@ -836,12 +870,6 @@ static bool osdDrawSingleElement(uint8_t item)
                 }
             }
 #endif
-
-            // Warn when in flip over after crash mode
-            if (osdWarnGetState(OSD_WARNING_CRASH_FLIP) && isFlipOverAfterCrashMode()) {
-                osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "CRASH FLIP");
-                break;
-            }
 
             // Show most severe reason for arming being disabled
             if (osdWarnGetState(OSD_WARNING_ARMING_DISABLE) && IS_RC_MODE_ACTIVE(BOXARM) && isArmingDisabled()) {
@@ -948,16 +976,32 @@ static bool osdDrawSingleElement(uint8_t item)
 
     case OSD_NUMERICAL_VARIO:
         {
-            const int verticalSpeed = osdGetMetersToSelectedUnit(getEstimatedVario());
-            const char directionSymbol = verticalSpeed < 0 ? SYM_ARROW_SOUTH : SYM_ARROW_NORTH;
-            tfp_sprintf(buff, "%c%01d.%01d", directionSymbol, abs(verticalSpeed / 100), abs((verticalSpeed % 100) / 10));
+            bool haveBaro = false;
+            bool haveGps = false;
+#ifdef USE_BARO
+            haveBaro = sensors(SENSOR_BARO);
+#endif
+#ifdef USE_GPS
+            haveGps = sensors(SENSOR_GPS) && STATE(GPS_FIX);
+#endif
+            if (haveBaro || haveGps) {
+                const int verticalSpeed = osdGetMetersToSelectedUnit(getEstimatedVario());
+                const char directionSymbol = verticalSpeed < 0 ? SYM_ARROW_SOUTH : SYM_ARROW_NORTH;
+                tfp_sprintf(buff, "%c%01d.%01d", directionSymbol, abs(verticalSpeed / 100), abs((verticalSpeed % 100) / 10));
+            } else {
+                // We use this symbol when we don't have a valid measure
+                buff[0] = SYM_COLON;
+                // overwrite any previous vertical speed with blanks
+                memset(buff + 1, SYM_BLANK, 6);
+                buff[7] = '\0';
+            }
             break;
         }
 
 #ifdef USE_ESC_SENSOR
     case OSD_ESC_TMP:
         if (feature(FEATURE_ESC_SENSOR)) {
-            tfp_sprintf(buff, "%3d%c", osdConvertTemperatureToSelectedUnit(escDataCombined->temperature * 10) / 10, osdGetTemperatureSymbolForSelectedUnit());
+            tfp_sprintf(buff, "%3d%c", osdConvertTemperatureToSelectedUnit(escDataCombined->temperature), osdGetTemperatureSymbolForSelectedUnit());
         }
         break;
 
@@ -984,7 +1028,7 @@ static bool osdDrawSingleElement(uint8_t item)
 
 #ifdef USE_ADC_INTERNAL
     case OSD_CORE_TEMPERATURE:
-        tfp_sprintf(buff, "%3d%c", osdConvertTemperatureToSelectedUnit(getCoreTemperatureCelsius() * 10) / 10, osdGetTemperatureSymbolForSelectedUnit());
+        tfp_sprintf(buff, "%3d%c", osdConvertTemperatureToSelectedUnit(getCoreTemperatureCelsius()), osdGetTemperatureSymbolForSelectedUnit());
         break;
 #endif
 
@@ -1046,6 +1090,7 @@ static void osdDrawElements(void)
     osdDrawSingleElement(OSD_CORE_TEMPERATURE);
 #endif
 }
+#endif // USE_CMS
 
 void pgResetFn_osdConfig(osdConfig_t *osdConfig)
 {
@@ -1461,7 +1506,6 @@ static void osdShowStats(uint16_t endBatteryVoltage)
         osdDisplayStatisticLabel(top++, "BB LOG NUM", buff);
     }
 #endif
-
 }
 
 static void osdShowArmed(void)
