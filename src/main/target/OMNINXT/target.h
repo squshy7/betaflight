@@ -172,6 +172,8 @@
 
 #define USE_ADC
 #define ADC_INSTANCE            ADC1
+#define ADC1_DMA_OPT            1  // DMA 2 Stream 4 Channel 0 (compat default)
+#define ADC1_DMA_OPT            1  // DMA 2 Stream 4 Channel 0 (compat default)
 #define VBAT_ADC_PIN            PC0  // 11:1 (10K + 1K) divider
 #define CURRENT_METER_ADC_PIN   PC1
 #define RSSI_ADC_PIN            PC4
@@ -189,8 +191,6 @@
 
 #define DEFAULT_VOLTAGE_METER_SOURCE VOLTAGE_METER_ADC
 #define DEFAULT_CURRENT_METER_SOURCE CURRENT_METER_ADC
-
-#define USE_SERIAL_4WAY_BLHELI_INTERFACE
 
 #define TARGET_IO_PORTA (0xffff & ~(BIT(14)|BIT(13))) // Less SWC and SWD
 #define TARGET_IO_PORTB (0xffff)

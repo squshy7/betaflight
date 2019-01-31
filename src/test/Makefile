@@ -1,4 +1,5 @@
 # A sample Makefile for building Google Test and using it in user
+# A sample Makefile for building Google Test and using it in user
 # tests.  Please tweak it to suit your environment and project.  You
 # may want to move it to your project's root directory.
 #
@@ -94,7 +95,7 @@ blackbox_encoding_unittest_SRC :=  \
 		$(USER_DIR)/common/typeconversion.c
 
 cli_unittest_SRC := \
-		$(USER_DIR)/interface/cli.c \
+		$(USER_DIR)/cli/cli.c \
 		$(USER_DIR)/config/feature.c \
 		$(USER_DIR)/pg/pg.c \
                 $(USER_DIR)/common/typeconversion.c
@@ -106,6 +107,7 @@ cli_unittest_DEFINES := \
 
 cms_unittest_SRC := \
 		$(USER_DIR)/cms/cms.c \
+		$(USER_DIR)/cms/cms_menu_saveexit.c \
 		$(USER_DIR)/common/typeconversion.c \
 		$(USER_DIR)/drivers/display.c
 
@@ -155,7 +157,10 @@ ledstrip_unittest_SRC := \
 		$(USER_DIR)/fc/rc_modes.c \
 		$(USER_DIR)/io/ledstrip.c
 
-
+ledstrip_unittest_DEFINES := \
+        USE_LED_STRIP=
+       
+       
 maths_unittest_SRC := \
 		$(USER_DIR)/common/maths.c
 
@@ -186,7 +191,7 @@ rc_controls_unittest_SRC := \
 		$(USER_DIR)/common/bitarray.c \
 		$(USER_DIR)/common/maths.c \
 		$(USER_DIR)/fc/rc_adjustments.c \
-		$(USER_DIR)/fc/rc_modes.c \
+		$(USER_DIR)/fc/rc_modes.c
 
 
 rx_crsf_unittest_SRC := \
@@ -421,6 +426,8 @@ TEST_SRCS = $(sort $(wildcard $(TEST_DIR)/*.cc))
 TEST_BASENAMES = $(TEST_SRCS:$(TEST_DIR)/%.cc=%)
 TESTS = $(foreach test,$(TEST_BASENAMES),$(if $($(test)_EXPAND),$(foreach \
 		target,$(filter-out $($(test)_BLACKLIST),$(VALID_TARGETS)),$(test).$(target)),$(test)))
+TESTS_REPRESENTATIVE = $(foreach test,$(TEST_BASENAMES),$(if $($(test)_EXPAND),$(test).$(word \
+		1,$(filter-out $($(test)_BLACKLIST),$(VALID_TARGETS))),$(test)))
 
 # All Google Test headers.  Usually you shouldn't change this
 # definition.
@@ -435,6 +442,9 @@ include ../../make/build_verbosity.mk
 
 ## test        : Build and run the Unit Tests (default goal)
 test: $(TESTS:%=test_%)
+
+## test-representative : Build and run a representative subset of the Unit Tests (i.e. run every expanded test only for the first target)
+test-representative: $(TESTS_REPRESENTATIVE:%=test_%)
 
 ## junittest   : Build and run the Unit Tests, producing Junit XML result files."
 junittest: EXEC_OPTS = "--gtest_output=xml:$<_results.xml"

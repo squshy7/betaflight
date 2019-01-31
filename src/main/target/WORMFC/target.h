@@ -188,14 +188,13 @@
 #define DEFAULT_RX_FEATURE      FEATURE_RX_SERIAL
 #define SERIALRX_PROVIDER       SERIALRX_SBUS
 
-#define USE_SERIAL_4WAY_BLHELI_INTERFACE
 #define ENABLE_BLACKBOX_LOGGING_ON_SDCARD_BY_DEFAULT
 
 //SD CARD
 #define USE_SDCARD
 #define USE_SDCARD_SDIO
 
-#define SDIO_DMA          DMA2_Stream3
+#define SDIO_DMA_OPT            0  // DMA 2 Stream 3 Channel 4
 #define SDCARD_SPI_CS_PIN NONE //This is not used on SDIO, has to be kept for now to keep compiler happy
 #if defined(PIRXF4)
 #define SDCARD_DETECT_PIN PC15
