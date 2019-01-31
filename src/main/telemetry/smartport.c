@@ -55,12 +55,12 @@
 #include "flight/pid.h"
 #include "flight/position.h"
 
-#include "interface/msp.h"
-
 #include "io/beeper.h"
 #include "io/gps.h"
 #include "io/motors.h"
 #include "io/serial.h"
+
+#include "msp/msp.h"
 
 #include "rx/rx.h"
 
@@ -799,7 +799,7 @@ void processSmartPortTelemetry(smartPortPayload_t *payload, volatile bool *clear
 #if defined(USE_ADC_INTERNAL)
             case FSSP_DATAID_T11        :
                 smartPortSendPackage(id, getCoreTemperatureCelsius());
-
+                *clearToSend = false;
                 break;
 #endif
 #ifdef USE_GPS

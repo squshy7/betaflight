@@ -11,7 +11,7 @@
  * will be useful, but WITHOUT ANY WARRANTY; without even the implied
  * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  * See the GNU General Public License for more details.
-*
+ *
  * You should have received a copy of the GNU General Public License
  * along with this software.
  *
@@ -44,6 +44,8 @@ extern uint8_t __config_end;
 #include "build/debug.h"
 #include "build/version.h"
 
+#include "cli/settings.h"
+
 #include "cms/cms.h"
 
 #include "common/axis.h"
@@ -62,6 +64,7 @@ extern uint8_t __config_end;
 #include "drivers/adc.h"
 #include "drivers/buf_writer.h"
 #include "drivers/bus_spi.h"
+#include "drivers/dma_reqmap.h"
 #include "drivers/camera_control.h"
 #include "drivers/compass/compass.h"
 #include "drivers/display.h"
@@ -101,12 +104,6 @@ extern uint8_t __config_end;
 #include "flight/position.h"
 #include "flight/servos.h"
 
-#include "interface/cli.h"
-#include "interface/msp.h"
-#include "interface/msp_box.h"
-#include "interface/msp_protocol.h"
-#include "interface/settings.h"
-
 #include "io/asyncfatfs/asyncfatfs.h"
 #include "io/beeper.h"
 #include "io/flashfs.h"
@@ -119,6 +116,10 @@ extern uint8_t __config_end;
 #include "io/usb_msc.h"
 #include "io/vtx_control.h"
 #include "io/vtx.h"
+
+#include "msp/msp.h"
+#include "msp/msp_box.h"
+#include "msp/msp_protocol.h"
 
 #include "pg/adc.h"
 #include "pg/beeper.h"
@@ -135,6 +136,8 @@ extern uint8_t __config_end;
 #include "pg/rx.h"
 #include "pg/rx_spi.h"
 #include "pg/rx_pwm.h"
+#include "pg/serial_uart.h"
+#include "pg/sdio.h"
 #include "pg/timerio.h"
 #include "pg/usb.h"
 
@@ -156,6 +159,8 @@ extern uint8_t __config_end;
 
 #include "telemetry/frsky_hub.h"
 #include "telemetry/telemetry.h"
+
+#include "cli.h"
 
 
 static serialPort_t *cliPort;
@@ -219,7 +224,7 @@ static const char * const featureNames[] = {
 static const char rxFailsafeModeCharacters[] = "ahs";
 
 static const rxFailsafeChannelMode_e rxFailsafeModesTable[RX_FAILSAFE_TYPE_COUNT][RX_FAILSAFE_MODE_COUNT] = {
-    { RX_FAILSAFE_MODE_AUTO, RX_FAILSAFE_MODE_HOLD, RX_FAILSAFE_MODE_INVALID },
+    { RX_FAILSAFE_MODE_AUTO, RX_FAILSAFE_MODE_HOLD, RX_FAILSAFE_MODE_SET },
     { RX_FAILSAFE_MODE_INVALID, RX_FAILSAFE_MODE_HOLD, RX_FAILSAFE_MODE_SET }
 };
 
@@ -235,6 +240,14 @@ static const char * const *sensorHardwareNames[] = {
     lookupTableGyroHardware, lookupTableAccHardware, lookupTableBaroHardware, lookupTableMagHardware, lookupTableRangefinderHardware
 };
 #endif // USE_SENSOR_NAMES
+
+#if defined(USE_DSHOT) && defined(USE_DSHOT_TELEMETRY)
+extern uint32_t readDoneCount;
+extern uint32_t inputBuffer[DSHOT_TELEMETRY_INPUT_LEN];
+extern uint32_t setDirectionMicros;
+#endif
+
+
 
 static void backupPgConfig(const pgRegistry_t *pg)
 {
@@ -1568,7 +1581,7 @@ static void cliRxRange(char *cmdline)
     }
 }
 
-#ifdef USE_LED_STRIP
+#ifdef USE_LED_STRIP_STATUS_MODE
 static void printLed(uint8_t dumpMask, const ledConfig_t *ledConfigs, const ledConfig_t *defaultLedConfigs)
 {
     const char *format = "led %u %s";
@@ -2611,6 +2624,7 @@ void cliRxSpiBind(char *cmdline){
 #endif
 #if defined(USE_RX_FRSKY_SPI_X)
     case RX_SPI_FRSKY_X:
+    case RX_SPI_FRSKY_X_LBT:
 #endif
 #endif // USE_RX_FRSKY_SPI
 #ifdef USE_RX_SFHSS_SPI
@@ -3709,6 +3723,28 @@ static void cliStatus(char *cmdline)
         cliPrintf(" %s", armingDisableFlagNames[bitpos]);
     }
     cliPrintLinefeed();
+#if defined(USE_DSHOT) && defined(USE_DSHOT_TELEMETRY)
+    if (useDshotTelemetry) {
+        cliPrintLinef("Dshot reads: %u", readDoneCount);
+        cliPrintLinef("Dshot invalid pkts: %u", dshotInvalidPacketCount);
+        extern uint32_t setDirectionMicros;
+        cliPrintLinef("Dshot irq micros: %u", setDirectionMicros);
+        for (int i = 0; i<getMotorCount(); i++) {
+            cliPrintLinef( "Dshot RPM Motor %u: %u", i, (int)getDshotTelemetry(i));
+        }
+        bool proshot = (motorConfig()->dev.motorPwmProtocol == PWM_TYPE_PROSHOT1000);
+        int modulo = proshot ? MOTOR_NIBBLE_LENGTH_PROSHOT : MOTOR_BITLENGTH;
+        int len = proshot ? 8 : DSHOT_TELEMETRY_INPUT_LEN;
+        for (int i=0; i<len; i++) {
+            cliPrintf("%u ", (int)inputBuffer[i]);
+        }
+        cliPrintLinefeed();
+        for (int i=1; i<len; i+=2) {
+            cliPrintf("%u ", (int)(inputBuffer[i] + modulo - inputBuffer[i-1]) % modulo);
+        }
+        cliPrintLinefeed();
+    }
+#endif
 }
 
 #if defined(USE_TASK_STATISTICS)
@@ -3732,7 +3768,7 @@ static void cliTasks(char *cmdline)
             int taskFrequency;
             int subTaskFrequency = 0;
             if (taskId == TASK_GYROPID) {
-                subTaskFrequency = taskInfo.latestDeltaTime == 0 ? 0 : (int)(1000000.0f / ((float)taskInfo.latestDeltaTime));
+                subTaskFrequency = taskInfo.movingAverageCycleTime == 0.0f ? 0.0f : (int)(1000000.0f / (taskInfo.movingAverageCycleTime));
                 taskFrequency = subTaskFrequency / pidConfig()->pid_process_denom;
                 if (pidConfig()->pid_process_denom > 1) {
                     cliPrintf("%02d - (%15s) ", taskId, taskInfo.taskName);
@@ -3741,7 +3777,7 @@ static void cliTasks(char *cmdline)
                     cliPrintf("%02d - (%11s/%3s) ", taskId, taskInfo.subTaskName, taskInfo.taskName);
                 }
             } else {
-                taskFrequency = taskInfo.latestDeltaTime == 0 ? 0 : (int)(1000000.0f / ((float)taskInfo.latestDeltaTime));
+                taskFrequency = taskInfo.averageDeltaTime == 0 ? 0 : (int)(1000000.0f / ((float)taskInfo.averageDeltaTime));
                 cliPrintf("%02d - (%15s) ", taskId, taskInfo.taskName);
             }
             const int maxLoad = taskInfo.maxExecutionTime == 0 ? 0 :(taskInfo.maxExecutionTime * taskFrequency + 5000) / 1000;
@@ -3777,7 +3813,7 @@ static void cliVersion(char *cmdline)
 {
     UNUSED(cmdline);
 
-    cliPrintLinef("# %s / %s (%s) %s %s / %s (%s) MSP API: %s",
+    cliPrintf("# %s / %s (%s) %s %s / %s (%s) MSP API: %s",
         FC_FIRMWARE_NAME,
         targetName,
         systemConfig()->boardIdentifier,
@@ -3787,6 +3823,11 @@ static void cliVersion(char *cmdline)
         shortGitRevision,
         MSP_API_VERSION_STRING
     );
+#ifdef FEATURE_CUT_LEVEL
+    cliPrintLinef(" / FEATURE CUT LEVEL %d", FEATURE_CUT_LEVEL);
+#else
+    cliPrintLinefeed();
+#endif
 }
 
 #ifdef USE_RC_SMOOTHING_FILTER
@@ -4193,7 +4234,225 @@ static void cliDma(char* cmdLine)
     UNUSED(cmdLine);
     printDma();
 }
-#endif /* USE_RESOURCE_MGMT */
+
+#ifdef USE_DMA_SPEC
+
+typedef struct dmaoptEntry_s {
+    char *device;
+    dmaPeripheral_e peripheral;
+    pgn_t pgn;
+    uint8_t stride;
+    uint8_t offset;
+    uint8_t maxIndex;
+} dmaoptEntry_t;
+
+// Handy macros for keeping the table tidy.
+// DEFS : Single entry
+// DEFA : Array of uint8_t (stride = 1)
+// DEFW : Wider stride case; array of structs.
+
+#define DEFS(device, peripheral, pgn, type, member) \
+    { device, peripheral, pgn, 0,               offsetof(type, member), 0 }
+
+#define DEFA(device, peripheral, pgn, type, member, max) \
+    { device, peripheral, pgn, sizeof(uint8_t), offsetof(type, member), max }
+
+#define DEFW(device, peripheral, pgn, type, member, max) \
+    { device, peripheral, pgn, sizeof(type), offsetof(type, member), max }
+
+dmaoptEntry_t dmaoptEntryTable[] = {
+    DEFW("SPI_TX",  DMA_PERIPH_SPI_TX,  PG_SPI_PIN_CONFIG,     spiPinConfig_t,     txDmaopt, SPIDEV_COUNT),
+    DEFW("SPI_RX",  DMA_PERIPH_SPI_RX,  PG_SPI_PIN_CONFIG,     spiPinConfig_t,     rxDmaopt, SPIDEV_COUNT),
+    DEFA("ADC",     DMA_PERIPH_ADC,     PG_ADC_CONFIG,         adcConfig_t,        dmaopt,   ADCDEV_COUNT),
+    DEFS("SDIO",    DMA_PERIPH_SDIO,    PG_SDIO_CONFIG,        sdioConfig_t,       dmaopt),
+    DEFA("UART_TX", DMA_PERIPH_UART_TX, PG_SERIAL_UART_CONFIG, serialUartConfig_t, txDmaopt, UARTDEV_CONFIG_MAX),
+    DEFA("UART_RX", DMA_PERIPH_UART_RX, PG_SERIAL_UART_CONFIG, serialUartConfig_t, rxDmaopt, UARTDEV_CONFIG_MAX),
+};
+
+#undef DEFS
+#undef DEFA
+#undef DEFW
+
+#define DMA_OPT_UI_INDEX(i) ((i) + 1)
+#define DMA_OPT_STRING_BUFSIZE 5
+
+static void dmaoptToString(int optval, char *buf)
+{
+    if (optval == -1) {
+        memcpy(buf, "NONE", DMA_OPT_STRING_BUFSIZE);
+    } else {
+        tfp_sprintf(buf, "%d", optval);
+    }
+}
+
+static void printPeripheralDmaopt(dmaoptEntry_t *entry, int index, uint8_t dumpMask)
+{
+    const pgRegistry_t* pg = pgFind(entry->pgn);
+    const void *currentConfig;
+    const void *defaultConfig;
+
+    if (configIsInCopy) {
+        currentConfig = pg->copy;
+        defaultConfig = pg->address;
+    } else {
+        currentConfig = pg->address;
+        defaultConfig = NULL;
+    }
+
+    dmaoptValue_t currentOpt = *(dmaoptValue_t *)((uint8_t *)currentConfig + entry->stride * index + entry->offset);
+    dmaoptValue_t defaultOpt;
+
+    if (defaultConfig) {
+        defaultOpt = *(dmaoptValue_t *)((uint8_t *)defaultConfig + entry->stride * index + entry->offset);
+    } else {
+        defaultOpt = DMA_OPT_UNUSED;
+    }
+
+    bool equalsDefault = currentOpt == defaultOpt;
+
+    if (defaultConfig) {
+        if (defaultOpt != DMA_OPT_UNUSED) {
+            const dmaChannelSpec_t *dmaChannelSpec = dmaGetChannelSpec(entry->peripheral, index, defaultOpt);
+            dmaCode_t dmaCode = 0;
+            if (dmaChannelSpec) {
+                dmaCode = dmaChannelSpec->code;
+            }
+            cliDefaultPrintLinef(dumpMask, equalsDefault,
+                "dmaopt %s %d %d # DMA%d Stream %d Channel %d",
+                entry->device, DMA_OPT_UI_INDEX(index), defaultOpt, DMA_CODE_CONTROLLER(dmaCode), DMA_CODE_STREAM(dmaCode), DMA_CODE_CHANNEL(dmaCode));
+        } else {
+            cliDefaultPrintLinef(dumpMask, equalsDefault,
+                "dmaopt %s %d NONE",
+                entry->device, DMA_OPT_UI_INDEX(index));
+        }
+    }
+
+    if (currentOpt != DMA_OPT_UNUSED) {
+        const dmaChannelSpec_t *dmaChannelSpec = dmaGetChannelSpec(entry->peripheral, index, currentOpt);
+        dmaCode_t dmaCode = 0;
+        if (dmaChannelSpec) {
+            dmaCode = dmaChannelSpec->code;
+        }
+        cliDumpPrintLinef(dumpMask, equalsDefault,
+            "dmaopt %s %d %d # DMA%d Stream %d Channel %d",
+            entry->device, DMA_OPT_UI_INDEX(index), currentOpt, DMA_CODE_CONTROLLER(dmaCode), DMA_CODE_STREAM(dmaCode), DMA_CODE_CHANNEL(dmaCode));
+    } else {
+        if (!(dumpMask & HIDE_UNUSED)) {
+            cliDumpPrintLinef(dumpMask, equalsDefault,
+                "dmaopt %s %d NONE",
+                entry->device, DMA_OPT_UI_INDEX(index));
+        }
+    }
+}
+
+static void printDmaopt(uint8_t dumpMask)
+{
+    UNUSED(dumpMask); // XXX For now
+
+    for (size_t i = 0; i < ARRAYLEN(dmaoptEntryTable); i++) {
+        dmaoptEntry_t *entry = &dmaoptEntryTable[i];
+        for (int index = 0; index < entry->maxIndex; index++) {
+            printPeripheralDmaopt(entry, index, dumpMask);
+        }
+    }
+}
+
+static void cliDmaopt(char *cmdline)
+{
+    char *pch = NULL;
+    char *saveptr;
+
+    // Peripheral name or command option
+    pch = strtok_r(cmdline, " ", &saveptr);
+
+    if (!pch) {
+        printDmaopt(DUMP_MASTER | HIDE_UNUSED);
+        return;
+    }
+
+    if (strcasecmp(pch, "all") == 0) {
+        printDmaopt(DUMP_MASTER);
+        return;
+    }
+
+    dmaoptEntry_t *entry = NULL;
+    for (unsigned i = 0; i < ARRAYLEN(dmaoptEntryTable); i++) {
+        if (strcasecmp(pch, dmaoptEntryTable[i].device) == 0) {
+            entry = &dmaoptEntryTable[i];
+        }
+    }
+    if (!entry) {
+        cliPrintLinef("bad device %s", pch);
+        return;
+    }
+
+    // Index
+    pch = strtok_r(NULL, " ", &saveptr);
+    int index = atoi(pch) - 1;
+    if (index < 0 || index >= entry->maxIndex) {
+        cliPrintLinef("bad index %s", pch);
+        return;
+    }
+
+    const pgRegistry_t* pg = pgFind(entry->pgn);
+    const void *currentConfig;
+    if (configIsInCopy) {
+        currentConfig = pg->copy;
+    } else {
+        currentConfig = pg->address;
+    }
+    dmaoptValue_t *optaddr = (dmaoptValue_t *)((uint8_t *)currentConfig + entry->stride * index + entry->offset);
+
+    // opt or list
+    pch = strtok_r(NULL, " ", &saveptr);
+
+    if (!pch) {
+        if (*optaddr == -1) {
+            cliPrintLinef("%s %d NONE", entry->device, index + 1);
+        } else {
+            cliPrintLinef("%s %d %d", entry->device, index + 1, *optaddr);
+        }
+        return;
+    } else if (strcasecmp(pch, "list") == 0) {
+        // Show possible opts
+        const dmaChannelSpec_t *dmaChannelSpec;
+        for (int opt = 0; (dmaChannelSpec = dmaGetChannelSpec(entry->peripheral, index, opt)); opt++) {
+            cliPrintLinef("# %d: DMA%d Stream %d channel %d", opt, DMA_CODE_CONTROLLER(dmaChannelSpec->code), DMA_CODE_STREAM(dmaChannelSpec->code), DMA_CODE_CHANNEL(dmaChannelSpec->code));
+        }
+        return;
+    } else if (pch) {
+        int optval;
+
+        if (strcasecmp(pch, "none") == 0) {
+            optval = -1;
+        } else {
+            optval = atoi(pch);
+            if (optval < 0) { // XXX Check against opt max? How?
+                cliPrintLinef("bad optnum %s", pch);
+                return;
+            }
+        }
+
+        dmaoptValue_t orgval = *optaddr;
+
+        char optvalString[5];
+        char orgvalString[5];
+        dmaoptToString(optval, optvalString);
+        dmaoptToString(orgval, orgvalString);
+
+        if (optval != orgval) {
+            *optaddr = optval;
+
+            cliPrintLinef("dmaopt %s %d: changed from %s to %s", entry->device, DMA_OPT_UI_INDEX(index), orgvalString, optvalString);
+        } else {
+            cliPrintLinef("dmaopt %s %d: no change", entry->device, DMA_OPT_UI_INDEX(index), orgvalString);
+        }
+    } else {
+        cliPrintLinef("bad option %s", pch);
+    }
+}
+#endif // USE_DMA_SPEC
+#endif // USE_RESOURCE_MGMT
 
 #ifdef USE_TIMER_MGMT
 
@@ -4358,6 +4617,10 @@ static void printConfig(char *cmdline, bool doDiff)
 #ifdef USE_RESOURCE_MGMT
         cliPrintHashLine("resources");
         printResource(dumpMask);
+#ifdef USE_DMA_SPEC
+        cliPrintHashLine("dmaopt");
+        printDmaopt(dumpMask);
+#endif
 #endif
 
 #ifndef USE_QUAD_MIXER_ONLY
@@ -4401,7 +4664,7 @@ static void printConfig(char *cmdline, bool doDiff)
         cliPrintHashLine("serial");
         printSerial(dumpMask, &serialConfig_Copy, serialConfig());
 
-#ifdef USE_LED_STRIP
+#ifdef USE_LED_STRIP_STATUS_MODE
         cliPrintHashLine("led");
         printLed(dumpMask, ledStripConfig_Copy.ledConfigs, ledStripConfig()->ledConfigs);
 
@@ -4515,6 +4778,7 @@ static void cliMsc(char *cmdline)
 }
 #endif
 
+
 typedef struct {
     const char *name;
 #ifndef MINIMAL_CLI
@@ -4561,13 +4825,16 @@ const clicmd_t cmdTable[] = {
 #if defined(USE_BOARD_INFO)
     CLI_COMMAND_DEF("board_name", "get / set the name of the board model", "[board name]", cliBoardName),
 #endif
-#ifdef USE_LED_STRIP
-    CLI_COMMAND_DEF("color", "configure colors", NULL, cliColor),
+#ifdef USE_LED_STRIP_STATUS_MODE
+        CLI_COMMAND_DEF("color", "configure colors", NULL, cliColor),
 #endif
     CLI_COMMAND_DEF("defaults", "reset to defaults and reboot", "[nosave]", cliDefaults),
     CLI_COMMAND_DEF("diff", "list configuration changes from default", "[master|profile|rates|all] {defaults}", cliDiff),
 #ifdef USE_RESOURCE_MGMT
     CLI_COMMAND_DEF("dma", "list dma utilisation", NULL, cliDma),
+#ifdef USE_DMA_SPEC
+    CLI_COMMAND_DEF("dmaopt", "assign dma spec to a device", "<device> <index> <optnum>", cliDmaopt),
+#endif
 #endif
 #ifdef USE_DSHOT
     CLI_COMMAND_DEF("dshotprog", "program DShot ESC(s)", "<index> <command>+", cliDshotProg),
@@ -4597,8 +4864,8 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("gyroregisters", "dump gyro config registers contents", NULL, cliDumpGyroRegisters),
 #endif
     CLI_COMMAND_DEF("help", NULL, NULL, cliHelp),
-#ifdef USE_LED_STRIP
-    CLI_COMMAND_DEF("led", "configure leds", NULL, cliLed),
+#ifdef USE_LED_STRIP_STATUS_MODE
+        CLI_COMMAND_DEF("led", "configure leds", NULL, cliLed),
 #endif
 #if defined(USE_BOARD_INFO)
     CLI_COMMAND_DEF("manufacturer_id", "get / set the id of the board manufacturer", "[manufacturer id]", cliManufacturerId),
@@ -4609,7 +4876,7 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("mixer", "configure mixer", "list\r\n\t<name>", cliMixer),
 #endif
     CLI_COMMAND_DEF("mmix", "custom motor mixer", NULL, cliMotorMix),
-#ifdef USE_LED_STRIP
+#ifdef USE_LED_STRIP_STATUS_MODE
     CLI_COMMAND_DEF("mode_color", "configure mode and special colors", NULL, cliModeColor),
 #endif
     CLI_COMMAND_DEF("motor",  "get/set motor", "<index> [<value>]", cliMotor),

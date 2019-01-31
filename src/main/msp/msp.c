@@ -78,10 +78,6 @@
 #include "flight/pid.h"
 #include "flight/servos.h"
 
-#include "interface/msp.h"
-#include "interface/msp_box.h"
-#include "interface/msp_protocol.h"
-
 #include "io/asyncfatfs/asyncfatfs.h"
 #include "io/beeper.h"
 #include "io/flashfs.h"
@@ -99,6 +95,8 @@
 #include "io/vtx.h"
 #include "io/vtx_string.h"
 
+#include "msp/msp_box.h"
+#include "msp/msp_protocol.h"
 #include "msp/msp_serial.h"
 
 #include "pg/beeper.h"
@@ -131,6 +129,9 @@
 #ifdef USE_HARDWARE_REVISION_DETECTION
 #include "hardware_revision.h"
 #endif
+
+#include "msp.h"
+
 
 static const char * const flightControllerIdentifier = BETAFLIGHT_IDENTIFIER; // 4 UPPER CASE alpha numeric characters that identify the flight controller.
 
@@ -382,6 +383,8 @@ static void serializeDataflashReadReply(sbuf_t *dst, uint32_t address, const uin
 #endif
 
     if (compressionMethod == NO_COMPRESSION) {
+
+        uint16_t *readLenPtr = (uint16_t *)sbufPtr(dst);
         if (!useLegacyFormat) {
             // new format supports variable read lengths
             sbufWriteU16(dst, readLen);
@@ -389,6 +392,11 @@ static void serializeDataflashReadReply(sbuf_t *dst, uint32_t address, const uin
         }
 
         const int bytesRead = flashfsReadAbs(address, sbufPtr(dst), readLen);
+
+        if (!useLegacyFormat) {
+            // update the 'read length' with the actual amount read from flash.
+            *readLenPtr = bytesRead;
+        }
 
         sbufAdvance(dst, bytesRead);
 
@@ -759,7 +767,11 @@ static bool mspCommonProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst, mspPostProce
         }
 
         // Enabled warnings
-        sbufWriteU16(dst, osdConfig()->enabledWarnings);
+        // Send low word first for backwards compatibility (API < 1.41)
+        sbufWriteU16(dst, (uint16_t)(osdConfig()->enabledWarnings & 0xFFFF));
+        // API >= 1.41; send the count and 32bit warnings
+        sbufWriteU8(dst, OSD_WARNING_COUNT);
+        sbufWriteU32(dst, osdConfig()->enabledWarnings);
 #endif
         break;
     }
@@ -1174,7 +1186,7 @@ static bool mspProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst)
         }
         break;
 
-#ifdef USE_LED_STRIP
+#ifdef USE_LED_STRIP_STATUS_MODE
     case MSP_LED_COLORS:
         for (int i = 0; i < LED_CONFIGURABLE_COLOR_COUNT; i++) {
             const hsvColor_t *color = &ledStripConfig()->colors[i];
@@ -1183,14 +1195,32 @@ static bool mspProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst)
             sbufWriteU8(dst, color->v);
         }
         break;
+#endif
 
+#ifdef USE_LED_STRIP
     case MSP_LED_STRIP_CONFIG:
         for (int i = 0; i < LED_MAX_STRIP_LENGTH; i++) {
+#ifdef USE_LED_STRIP_STATUS_MODE
             const ledConfig_t *ledConfig = &ledStripConfig()->ledConfigs[i];
             sbufWriteU32(dst, *ledConfig);
+#else
+            sbufWriteU32(dst, 0);
+#endif
         }
-        break;
 
+        // API 1.41 - add indicator for advanced profile support and the current profile selection
+        // 0 = basic ledstrip available
+        // 1 = advanced ledstrip available
+#ifdef USE_LED_STRIP_STATUS_MODE
+        sbufWriteU8(dst, 1);   // advanced ledstrip available
+#else
+        sbufWriteU8(dst, 0);   // only simple ledstrip available
+#endif
+        sbufWriteU8(dst, ledStripConfig()->ledstrip_profile);
+        break;
+#endif
+
+#ifdef USE_LED_STRIP_STATUS_MODE
     case MSP_LED_STRIP_MODECOLOR:
         for (int i = 0; i < LED_MODE_COUNT; i++) {
             for (int j = 0; j < LED_DIRECTION_COUNT; j++) {
@@ -2009,7 +2039,7 @@ static mspResult_e mspProcessInCommand(uint8_t cmdMSP, sbuf_t *src)
                 const uint8_t newChannel = (newFrequency % 8) + 1;
                 vtxSettingsConfigMutable()->band = newBand;
                 vtxSettingsConfigMutable()->channel = newChannel;
-                vtxSettingsConfigMutable()->freq = vtx58_Bandchan2Freq(newBand, newChannel);
+                vtxSettingsConfigMutable()->freq = vtxCommonLookupFrequency(vtxDevice, newBand, newChannel);
             } else if (newFrequency <= VTX_SETTINGS_MAX_FREQUENCY_MHZ) { // Value is frequency in MHz
                 vtxSettingsConfigMutable()->band = 0;
                 vtxSettingsConfigMutable()->channel = 0;
@@ -2248,7 +2278,7 @@ static mspResult_e mspProcessInCommand(uint8_t cmdMSP, sbuf_t *src)
         }
         break;
 
-#ifdef USE_LED_STRIP
+#ifdef USE_LED_STRIP_STATUS_MODE
     case MSP_SET_LED_COLORS:
         for (int i = 0; i < LED_CONFIGURABLE_COLOR_COUNT; i++) {
             hsvColor_t *color = &ledStripConfigMutable()->colors[i];
@@ -2257,27 +2287,40 @@ static mspResult_e mspProcessInCommand(uint8_t cmdMSP, sbuf_t *src)
             color->v = sbufReadU8(src);
         }
         break;
+#endif
 
+#ifdef USE_LED_STRIP
     case MSP_SET_LED_STRIP_CONFIG:
         {
             i = sbufReadU8(src);
             if (i >= LED_MAX_STRIP_LENGTH || dataSize != (1 + 4)) {
                 return MSP_RESULT_ERROR;
             }
+#ifdef USE_LED_STRIP_STATUS_MODE
             ledConfig_t *ledConfig = &ledStripConfigMutable()->ledConfigs[i];
             *ledConfig = sbufReadU32(src);
             reevaluateLedConfig();
+#else
+            sbufReadU32(src);
+#endif
+            // API 1.41 - selected ledstrip_profile
+            if (sbufBytesRemaining(src) >= 1) {
+                ledStripConfigMutable()->ledstrip_profile = sbufReadU8(src);
+            }
         }
         break;
+#endif
 
+#ifdef USE_LED_STRIP_STATUS_MODE
     case MSP_SET_LED_STRIP_MODECOLOR:
         {
             ledModeIndex_e modeIdx = sbufReadU8(src);
             int funIdx = sbufReadU8(src);
             int color = sbufReadU8(src);
 
-            if (!setModeColor(modeIdx, funIdx, color))
+            if (!setModeColor(modeIdx, funIdx, color)) {
                 return MSP_RESULT_ERROR;
+            }
         }
         break;
 #endif
@@ -2486,7 +2529,13 @@ static mspResult_e mspCommonProcessInCommand(uint8_t cmdMSP, sbuf_t *src, mspPos
 
                 if (sbufBytesRemaining(src) >= 2) {
                     /* Enabled warnings */
+                    // API < 1.41 supports only the low 16 bits
                     osdConfigMutable()->enabledWarnings = sbufReadU16(src);
+                }
+                
+                if (sbufBytesRemaining(src) >= 4) {
+                    // 32bit version of enabled warnings (API >= 1.41)
+                    osdConfigMutable()->enabledWarnings = sbufReadU32(src);
                 }
 #endif
             } else if ((int8_t)addr == -2) {
