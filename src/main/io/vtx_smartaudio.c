@@ -461,12 +461,7 @@ static void saSendFrame(uint8_t *buf, int len)
         sa_outstanding = SA_CMD_NONE;
     }
 
-<<<<<<< HEAD
-    serialWrite(smartAudioSerialPort, 0x00);
-
-=======
     serialWrite(smartAudioSerialPort, 0x00); // Pull the line low again after sending frame.
->>>>>>> upstream/master
     sa_lastTransmissionMs = millis();
 }
 
