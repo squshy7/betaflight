@@ -87,6 +87,7 @@ extern uint8_t __config_end;
 #include "drivers/transponder_ir.h"
 #include "drivers/usb_msc.h"
 #include "drivers/vtx_common.h"
+#include "drivers/vtx_table.h"
 
 #include "fc/board_info.h"
 #include "fc/config.h"
@@ -110,7 +111,6 @@ extern uint8_t __config_end;
 #include "io/gimbal.h"
 #include "io/gps.h"
 #include "io/ledstrip.h"
-#include "io/osd.h"
 #include "io/serial.h"
 #include "io/transponder_ir.h"
 #include "io/usb_msc.h"
@@ -120,6 +120,8 @@ extern uint8_t __config_end;
 #include "msp/msp.h"
 #include "msp/msp_box.h"
 #include "msp/msp_protocol.h"
+
+#include "osd/osd.h"
 
 #include "pg/adc.h"
 #include "pg/beeper.h"
@@ -140,6 +142,7 @@ extern uint8_t __config_end;
 #include "pg/sdio.h"
 #include "pg/timerio.h"
 #include "pg/usb.h"
+#include "pg/vtx_table.h"
 
 #include "rx/rx.h"
 #include "rx/spektrum.h"
@@ -388,19 +391,27 @@ static void cliPrintLinef(const char *format, ...)
     cliPrintLinefeed();
 }
 
-static void cliPrintErrorLinef(const char *format, ...)
+static void cliPrintErrorVa(const char *format, va_list va)
 {
-    cliPrint("###");
-    va_list va;
-    va_start(va, format);
+    cliPrint("###ERROR: ");
     cliPrintfva(format, va);
     va_end(va);
-    cliPrintLine("###");
+    cliPrint("###");
 }
 
-static void cliPrintCorruptMessage(int value)
+static void cliPrintError(const char *format, ...)
 {
-    cliPrintf("%d ###CORRUPTED CONFIG###", value);
+    va_list va;
+    va_start(va, format);
+    cliPrintErrorVa(format, va);
+}
+
+static void cliPrintErrorLinef(const char *format, ...)
+{
+    va_list va;
+    va_start(va, format);
+    cliPrintErrorVa(format, va);
+    cliPrintLinefeed();
 }
 
 static void getMinMax(const clivalue_t *var, int *min, int *max)
@@ -477,29 +488,26 @@ static void printValuePointer(const clivalue_t *var, const void *valuePointer, b
             break;
         }
 
+        bool valueIsCorrupted = false;
         switch (var->type & VALUE_MODE_MASK) {
         case MODE_DIRECT:
             if ((var->type & VALUE_TYPE_MASK) == VAR_UINT32) {
+                cliPrintf("%d", value);
                 if ((uint32_t) value > var->config.u32Max) {
-                    cliPrintCorruptMessage(value);
-                } else {
-                    cliPrintf("%d", value);
-                    if (full) {
-                        cliPrintf(" 0 %d", var->config.u32Max);
-                    }
+                    valueIsCorrupted = true;
+                } else if (full) {
+                    cliPrintf(" 0 %d", var->config.u32Max);
                 }
             } else {
                 int min;
                 int max;
                 getMinMax(var, &min, &max);
 
+                cliPrintf("%d", value);
                 if ((value < min) || (value > max)) {
-                    cliPrintCorruptMessage(value);
-                } else {
-                    cliPrintf("%d", value);
-                    if (full) {
-                        cliPrintf(" %d %d", min, max);
-                    }
+                    valueIsCorrupted = true;
+                } else if (full) {
+                    cliPrintf(" %d %d", min, max);
                 }
             }
             break;
@@ -507,7 +515,7 @@ static void printValuePointer(const clivalue_t *var, const void *valuePointer, b
             if (value < lookupTables[var->config.lookup.tableIndex].valueCount) {
                 cliPrint(lookupTables[var->config.lookup.tableIndex].values[value]);
             } else {
-                cliPrintCorruptMessage(value);
+                valueIsCorrupted = true;
             }
             break;
         case MODE_BITSET:
@@ -516,6 +524,11 @@ static void printValuePointer(const clivalue_t *var, const void *valuePointer, b
             } else {
                 cliPrintf("OFF");
             }
+        }
+
+        if (valueIsCorrupted) {
+            cliPrintLinefeed();
+            cliPrintError("CORRUPTED CONFIG: %s = %d", var->name, value);
         }
     }
 }
@@ -942,7 +955,7 @@ static void printAux(uint8_t dumpMask, const modeActivationCondition_t *modeActi
         bool equalsDefault = false;
         if (defaultModeActivationConditions) {
             const modeActivationCondition_t *macDefault = &defaultModeActivationConditions[i];
-            equalsDefault = !memcmp(mac, macDefault, sizeof(*mac));
+            equalsDefault = !isModeActivationConditionConfigured(mac, macDefault);
             const box_t *box = findBoxByBoxId(macDefault->modeId);
             const box_t *linkedTo = findBoxByBoxId(macDefault->linkedTo);
             if (box) {
@@ -1023,19 +1036,21 @@ static void cliAux(char *cmdline)
             }
             if (validArgumentCount == 4) { // for backwards compatibility
                 mac->modeLogic = MODELOGIC_OR;
+                mac->linkedTo = 0;
             } else if (validArgumentCount == 5) { // for backwards compatibility
                 mac->linkedTo = 0;
             } else if (validArgumentCount != 6) {
                 memset(mac, 0, sizeof(modeActivationCondition_t));
             }
+            analyzeModeActivationConditions();
             cliPrintLinef( "aux %u %u %u %u %u %u %u",
                 i,
-                mac->modeId,
+                findBoxByBoxId(mac->modeId)->permanentId,
                 mac->auxChannelIndex,
                 MODE_STEP_TO_CHANNEL_VALUE(mac->range.startStep),
                 MODE_STEP_TO_CHANNEL_VALUE(mac->range.endStep),
                 mac->modeLogic,
-                mac->linkedTo
+                findBoxByBoxId(mac->linkedTo)->permanentId
             );
         } else {
             cliShowArgumentRangeError("INDEX", 0, MAX_MODE_ACTIVATION_CONDITION_COUNT - 1);
@@ -1648,14 +1663,14 @@ static void cliLed(char *cmdline)
     const char *ptr;
 
     if (isEmpty(cmdline)) {
-        printLed(DUMP_MASTER, ledStripConfig()->ledConfigs, NULL);
+        printLed(DUMP_MASTER, ledStripStatusModeConfig()->ledConfigs, NULL);
     } else {
         ptr = cmdline;
         i = atoi(ptr);
         if (i < LED_MAX_STRIP_LENGTH) {
             ptr = nextArg(cmdline);
             if (parseLedStripConfig(i, ptr)) {
-                generateLedConfig((ledConfig_t *)&ledStripConfig()->ledConfigs[i], ledConfigBuffer, sizeof(ledConfigBuffer));
+                generateLedConfig((ledConfig_t *)&ledStripStatusModeConfig()->ledConfigs[i], ledConfigBuffer, sizeof(ledConfigBuffer));
                 cliDumpPrintLinef(0, false, format, i, ledConfigBuffer);
             } else {
                 cliShowParseError();
@@ -1685,14 +1700,14 @@ static void cliColor(char *cmdline)
 {
     const char *format = "color %u %d,%u,%u";
     if (isEmpty(cmdline)) {
-        printColor(DUMP_MASTER, ledStripConfig()->colors, NULL);
+        printColor(DUMP_MASTER, ledStripStatusModeConfig()->colors, NULL);
     } else {
         const char *ptr = cmdline;
         const int i = atoi(ptr);
         if (i < LED_CONFIGURABLE_COLOR_COUNT) {
             ptr = nextArg(cmdline);
             if (parseColor(i, ptr)) {
-                const hsvColor_t *color = &ledStripConfig()->colors[i];
+                const hsvColor_t *color = &ledStripStatusModeConfig()->colors[i];
                 cliDumpPrintLinef(0, false, format, i, color->h, color->s, color->v);
             } else {
                 cliShowParseError();
@@ -1703,12 +1718,12 @@ static void cliColor(char *cmdline)
     }
 }
 
-static void printModeColor(uint8_t dumpMask, const ledStripConfig_t *ledStripConfig, const ledStripConfig_t *defaultLedStripConfig)
+static void printModeColor(uint8_t dumpMask, const ledStripStatusModeConfig_t *ledStripStatusModeConfig, const ledStripStatusModeConfig_t *defaultLedStripConfig)
 {
     const char *format = "mode_color %u %u %u";
     for (uint32_t i = 0; i < LED_MODE_COUNT; i++) {
         for (uint32_t j = 0; j < LED_DIRECTION_COUNT; j++) {
-            int colorIndex = ledStripConfig->modeColors[i].color[j];
+            int colorIndex = ledStripStatusModeConfig->modeColors[i].color[j];
             bool equalsDefault = false;
             if (defaultLedStripConfig) {
                 int colorIndexDefault = defaultLedStripConfig->modeColors[i].color[j];
@@ -1720,7 +1735,7 @@ static void printModeColor(uint8_t dumpMask, const ledStripConfig_t *ledStripCon
     }
 
     for (uint32_t j = 0; j < LED_SPECIAL_COLOR_COUNT; j++) {
-        const int colorIndex = ledStripConfig->specialColors.color[j];
+        const int colorIndex = ledStripStatusModeConfig->specialColors.color[j];
         bool equalsDefault = false;
         if (defaultLedStripConfig) {
             const int colorIndexDefault = defaultLedStripConfig->specialColors.color[j];
@@ -1730,7 +1745,7 @@ static void printModeColor(uint8_t dumpMask, const ledStripConfig_t *ledStripCon
         cliDumpPrintLinef(dumpMask, equalsDefault, format, LED_SPECIAL, j, colorIndex);
     }
 
-    const int ledStripAuxChannel = ledStripConfig->ledstrip_aux_channel;
+    const int ledStripAuxChannel = ledStripStatusModeConfig->ledstrip_aux_channel;
     bool equalsDefault = false;
     if (defaultLedStripConfig) {
         const int ledStripAuxChannelDefault = defaultLedStripConfig->ledstrip_aux_channel;
@@ -1743,7 +1758,7 @@ static void printModeColor(uint8_t dumpMask, const ledStripConfig_t *ledStripCon
 static void cliModeColor(char *cmdline)
 {
     if (isEmpty(cmdline)) {
-        printModeColor(DUMP_MASTER, ledStripConfig(), NULL);
+        printModeColor(DUMP_MASTER, ledStripStatusModeConfig(), NULL);
     } else {
         enum {MODE = 0, FUNCTION, COLOR, ARGS_COUNT};
         int args[ARGS_COUNT];
@@ -2334,6 +2349,348 @@ static void cliVtx(char *cmdline)
 }
 
 #endif // VTX_CONTROL
+
+#ifdef USE_VTX_TABLE
+
+static char *formatVtxTableBandFrequency(const uint16_t *frequency, int channels)
+{
+    static char freqbuf[5 * VTX_TABLE_MAX_CHANNELS + 1];
+    char freqtmp[5 + 1];
+    freqbuf[0] = 0;
+    for (int channel = 0; channel < channels; channel++) {
+        tfp_sprintf(freqtmp, " %4d", frequency[channel]);
+        strcat(freqbuf, freqtmp);
+    }
+    return freqbuf;
+}
+
+static void printVtxTableBand(uint8_t dumpMask, int band, const vtxTableConfig_t *currentConfig, const vtxTableConfig_t *defaultConfig)
+{
+    char *fmt = "vtxtable band %d %s %c%s";
+    bool equalsDefault = false;
+
+    if (defaultConfig) {
+        equalsDefault = true;
+        if (strcasecmp(currentConfig->bandNames[band], defaultConfig->bandNames[band])) {
+            equalsDefault = false;
+        }
+        if (currentConfig->bandLetters[band] != defaultConfig->bandLetters[band]) {
+            equalsDefault = false;
+        }
+        for (int channel = 0; channel < VTX_TABLE_MAX_CHANNELS; channel++) {
+            if (currentConfig->frequency[band][channel] != defaultConfig->frequency[band][channel]) {
+                equalsDefault = false;
+              }
+        }
+        char *freqbuf = formatVtxTableBandFrequency(defaultConfig->frequency[band], defaultConfig->channels);
+        cliDefaultPrintLinef(dumpMask, equalsDefault, fmt, band + 1, defaultConfig->bandNames[band], defaultConfig->bandLetters[band], freqbuf);
+    }
+
+    char *freqbuf = formatVtxTableBandFrequency(currentConfig->frequency[band], currentConfig->channels);
+    cliDumpPrintLinef(dumpMask, equalsDefault, fmt, band + 1, currentConfig->bandNames[band], currentConfig->bandLetters[band], freqbuf);
+}
+
+static char *formatVtxTablePowerValues(const uint16_t *levels, int count)
+{
+    // (max 4 digit + 1 space) per level
+    static char pwrbuf[5 * VTX_TABLE_MAX_POWER_LEVELS + 1];
+    char pwrtmp[5 + 1];
+    pwrbuf[0] = 0;
+    for (int pwrindex = 0; pwrindex < count; pwrindex++) {
+        tfp_sprintf(pwrtmp, " %d", levels[pwrindex]);
+        strcat(pwrbuf, pwrtmp);
+    }
+    return pwrbuf;
+}
+
+static void printVtxTablePowerValues(uint8_t dumpMask, const vtxTableConfig_t *currentConfig, const vtxTableConfig_t *defaultConfig)
+{
+    char *fmt = "vtxtable powervalues %s";
+    bool equalsDefault = false;
+    if (defaultConfig) {
+        equalsDefault = true;
+        for (int pwrindex = 0; pwrindex < VTX_TABLE_MAX_POWER_LEVELS; pwrindex++) {
+            if (defaultConfig->powerValues[pwrindex] != currentConfig->powerValues[pwrindex]) {
+                equalsDefault = false;
+            }
+        }
+        char *pwrbuf = formatVtxTablePowerValues(defaultConfig->powerValues, VTX_TABLE_MAX_POWER_LEVELS);
+        cliDefaultPrintLinef(dumpMask, equalsDefault, fmt, pwrbuf);
+    }
+
+    char *pwrbuf = formatVtxTablePowerValues(currentConfig->powerValues, currentConfig->powerLevels);
+    cliDumpPrintLinef(dumpMask, equalsDefault, fmt, pwrbuf);
+}
+
+static char *formatVtxTablePowerLabels(const char labels[VTX_TABLE_MAX_POWER_LEVELS][VTX_TABLE_POWER_LABEL_LENGTH + 1], int count)
+{
+    static char pwrbuf[(VTX_TABLE_POWER_LABEL_LENGTH + 1) * VTX_TABLE_MAX_POWER_LEVELS + 1];
+    char pwrtmp[(VTX_TABLE_POWER_LABEL_LENGTH + 1) + 1];
+    pwrbuf[0] = 0;
+    for (int pwrindex = 0; pwrindex < count; pwrindex++) {
+        strcat(pwrbuf, " ");
+        strcpy(pwrtmp, labels[pwrindex]);
+        // trim trailing space
+        char *sp;
+        while ((sp = strchr(pwrtmp, ' '))) {
+            *sp = 0;
+        }
+        strcat(pwrbuf, pwrtmp);
+    }
+    return pwrbuf;
+}
+
+static void printVtxTablePowerLabels(uint8_t dumpMask, const vtxTableConfig_t *currentConfig, const vtxTableConfig_t *defaultConfig)
+{
+    char *fmt = "vtxtable powerlabels%s";
+    bool equalsDefault = false;
+    if (defaultConfig) {
+        equalsDefault = true;
+        for (int pwrindex = 0; pwrindex < VTX_TABLE_MAX_POWER_LEVELS; pwrindex++) {
+            if (strcasecmp(defaultConfig->powerLabels[pwrindex], currentConfig->powerLabels[pwrindex])) {
+                equalsDefault = false;
+            }
+        }
+        char *pwrbuf = formatVtxTablePowerLabels(defaultConfig->powerLabels, VTX_TABLE_MAX_POWER_LEVELS);
+        cliDefaultPrintLinef(dumpMask, equalsDefault, fmt, pwrbuf);
+    }
+
+    char *pwrbuf = formatVtxTablePowerLabels(currentConfig->powerLabels, currentConfig->powerLevels);
+    cliDumpPrintLinef(dumpMask, equalsDefault, fmt, pwrbuf);
+}
+
+static void printVtxTable(uint8_t dumpMask, const vtxTableConfig_t *currentConfig, const vtxTableConfig_t *defaultConfig)
+{
+    bool equalsDefault;
+    char *fmt;
+
+    // bands
+    equalsDefault = false;
+    fmt = "vtxtable bands %d";
+    if (defaultConfig) {
+        equalsDefault = (defaultConfig->bands == currentConfig->bands);
+        cliDefaultPrintLinef(dumpMask, equalsDefault, fmt, defaultConfig->bands);
+    }
+    cliDumpPrintLinef(dumpMask, equalsDefault, fmt, currentConfig->bands);
+
+    // channels
+    equalsDefault = false;
+    fmt = "vtxtable channels %d";
+    if (defaultConfig) {
+        equalsDefault = (defaultConfig->channels == currentConfig->channels);
+        cliDefaultPrintLinef(dumpMask, equalsDefault, fmt, defaultConfig->channels);
+    }
+    cliDumpPrintLinef(dumpMask, equalsDefault, fmt, currentConfig->channels);
+
+    // band
+
+    for (int band = 0; band < currentConfig->bands; band++) {
+        printVtxTableBand(dumpMask, band, currentConfig, defaultConfig);
+    }
+
+    // powerlevels
+
+    equalsDefault = false;
+    fmt = "vtxtable powerlevels %d";
+    if (defaultConfig) {
+        equalsDefault = (defaultConfig->powerLevels == currentConfig->powerLevels);
+        cliDefaultPrintLinef(dumpMask, equalsDefault, fmt, defaultConfig->powerLevels);
+    }
+    cliDumpPrintLinef(dumpMask, equalsDefault, fmt, currentConfig->powerLevels);
+
+    // powervalues
+
+    // powerlabels
+    printVtxTablePowerValues(dumpMask, currentConfig, defaultConfig);
+    printVtxTablePowerLabels(dumpMask, currentConfig, defaultConfig);
+}
+
+static void cliVtxTable(char *cmdline)
+{
+    char *tok;
+    char *saveptr;
+
+    // Band number or nothing
+    tok  = strtok_r(cmdline, " ", &saveptr);
+
+    if (!tok) {
+        printVtxTable(DUMP_MASTER | HIDE_UNUSED, vtxTableConfigMutable(), NULL);
+        return;
+    }
+
+    if (strcasecmp(tok, "bands") == 0) {
+        tok = strtok_r(NULL, " ", &saveptr);
+        int bands = atoi(tok);
+        if (bands < 0 || bands > VTX_TABLE_MAX_BANDS) {
+            cliPrintErrorLinef("INVALID BAND COUNT (SHOULD BE BETWEEN 0 AND %d)", VTX_TABLE_MAX_BANDS);
+            return;
+        }
+        if (bands < vtxTableConfigMutable()->bands) {
+            for (int i = bands; i < vtxTableConfigMutable()->bands; i++) {
+                vtxTableConfigClearBand(vtxTableConfigMutable(), i);
+             }
+        }
+        vtxTableConfigMutable()->bands = bands;
+
+    } else if (strcasecmp(tok, "channels") == 0) {
+        tok = strtok_r(NULL, " ", &saveptr);
+
+        int channels = atoi(tok);
+        if (channels < 0 || channels > VTX_TABLE_MAX_BANDS) {
+            cliPrintErrorLinef("INVALID CHANNEL COUNT (SHOULD BE BETWEEN 0 AND %d)", VTX_TABLE_MAX_CHANNELS);
+            return;
+        }
+        if (channels < vtxTableConfigMutable()->channels) {
+            for (int i = 0; i < VTX_TABLE_MAX_BANDS; i++) {
+                vtxTableConfigClearChannels(vtxTableConfigMutable(), i, channels);
+            }
+        }
+        vtxTableConfigMutable()->channels = channels;
+
+    } else if (strcasecmp(tok, "powerlevels") == 0) {
+        // Number of power levels
+        tok = strtok_r(NULL, " ", &saveptr);
+        if (tok) {
+            int levels = atoi(tok);
+            if (levels < 0 || levels > VTX_TABLE_MAX_POWER_LEVELS) {
+                cliPrintErrorLinef("INVALID POWER LEVEL COUNT (SHOULD BE BETWEEN 0 AND %d)", VTX_TABLE_MAX_POWER_LEVELS);
+            } else {
+                if (levels < vtxTableConfigMutable()->powerLevels) {
+                    vtxTableConfigClearPowerValues(vtxTableConfigMutable(), levels);
+                    vtxTableConfigClearPowerLabels(vtxTableConfigMutable(), levels);
+                }
+                vtxTableConfigMutable()->powerLevels = levels;
+            }
+        } else {
+            // XXX Show current level count?
+        }
+        return;
+
+    } else if (strcasecmp(tok, "powervalues") == 0) {
+        // Power values
+        uint16_t power[VTX_TABLE_MAX_POWER_LEVELS];
+        int count;
+        int levels = vtxTableConfigMutable()->powerLevels;
+
+        memset(power, 0, sizeof(power));
+
+        for (count = 0; count < levels && (tok = strtok_r(NULL, " ", &saveptr)); count++) {
+            int value = atoi(tok);
+            power[count] = value;
+        }
+
+        // Check remaining tokens
+
+        if (count < levels) {
+            cliPrintErrorLinef("NOT ENOUGH VALUES (EXPECTED %d)", levels);
+            return;
+        } else if ((tok = strtok_r(NULL, " ", &saveptr))) {
+            cliPrintErrorLinef("TOO MANY VALUES (EXPECTED %d)", levels);
+            return;
+        }
+
+        for (int i = 0; i < VTX_TABLE_MAX_POWER_LEVELS; i++) {
+            vtxTableConfigMutable()->powerValues[i] = power[i];
+        }
+
+    } else if (strcasecmp(tok, "powerlabels") == 0) {
+        // Power labels
+        char label[VTX_TABLE_MAX_POWER_LEVELS][VTX_TABLE_POWER_LABEL_LENGTH + 1];
+        int levels = vtxTableConfigMutable()->powerLevels;
+        int count;
+        for (count = 0; count < levels && (tok = strtok_r(NULL, " ", &saveptr)); count++) {
+            strncpy(label[count], tok, VTX_TABLE_POWER_LABEL_LENGTH);
+            for (unsigned i = 0; i < strlen(label[count]); i++) {
+                label[count][i] = toupper(label[count][i]);
+            }
+        }
+
+        // Check remaining tokens
+
+        if (count < levels) {
+            cliPrintErrorLinef("NOT ENOUGH LABELS (EXPECTED %d)", levels);
+            return;
+        } else if ((tok = strtok_r(NULL, " ", &saveptr))) {
+            cliPrintErrorLinef("TOO MANY LABELS (EXPECTED %d)", levels);
+            return;
+        }
+
+        for (int i = 0; i < count; i++) {
+            vtxTableStrncpyWithPad(vtxTableConfigMutable()->powerLabels[i], label[i], VTX_TABLE_POWER_LABEL_LENGTH);
+        }
+    } else if (strcasecmp(tok, "band") == 0) {
+
+        int bands = vtxTableConfigMutable()->bands;
+
+        tok = strtok_r(NULL, " ", &saveptr);
+        if (!tok) {
+            return;
+        }
+
+        int band = atoi(tok);
+        --band;
+
+        if (band < 0 || band >= bands) {
+            cliPrintErrorLinef("INVALID BAND NUMBER %s (EXPECTED 1-%d)", tok, bands);
+            return;
+        }
+
+        // Band name
+        tok  = strtok_r(NULL, " ", &saveptr);
+
+        if (!tok) {
+            return;
+        }
+
+        char bandname[VTX_TABLE_BAND_NAME_LENGTH + 1];
+        memset(bandname, 0, VTX_TABLE_BAND_NAME_LENGTH + 1);
+        strncpy(bandname, tok, VTX_TABLE_BAND_NAME_LENGTH);
+        for (unsigned i = 0; i < strlen(bandname); i++) {
+            bandname[i] = toupper(bandname[i]);
+        }
+
+        // Band letter
+        tok  = strtok_r(NULL, " ", &saveptr);
+
+        if (!tok) {
+            return;
+        }
+
+        char bandletter = toupper(tok[0]);
+
+        uint16_t bandfreq[VTX_TABLE_MAX_CHANNELS];
+        int channel = 0;
+        int channels = vtxTableConfigMutable()->channels;
+
+        for (channel = 0; channel <  channels && (tok  = strtok_r(NULL, " ", &saveptr)); channel++) {
+            int freq = atoi(tok);
+            if (freq < 0) {
+                cliPrintErrorLinef("INVALID FREQUENCY %s", tok);
+                return;
+            }
+            bandfreq[channel] = freq;
+        }
+
+        if (channel < channels) {
+            cliPrintErrorLinef("NOT ENOUGH FREQUENCIES (EXPECTED %d)", channels);
+            return;
+        } else if ((tok = strtok_r(NULL, " ", &saveptr))) {
+            cliPrintErrorLinef("TOO MANY FREQUENCIES (EXPECTED %d)", channels);
+            return;
+        }
+
+        vtxTableStrncpyWithPad(vtxTableConfigMutable()->bandNames[band], bandname, VTX_TABLE_BAND_NAME_LENGTH);
+        vtxTableConfigMutable()->bandLetters[band] = bandletter;
+
+        for (int i = 0; i < channel; i++) {
+            vtxTableConfigMutable()->frequency[band][i] = bandfreq[i];
+        }
+    } else {
+        // Bad subcommand
+        cliPrintErrorLinef("INVALID SUBCOMMAND %s", tok);
+    }
+}
+#endif // USE_VTX_TABLE
 
 #ifdef USE_OSD
 static void printDisplayName(uint8_t dumpMask, const pilotConfig_t *pilotConfig)
@@ -3329,9 +3686,11 @@ static void cliProfile(char *cmdline)
         return;
     } else {
         const int i = atoi(cmdline);
-        if (i >= 0 && i < MAX_PROFILE_COUNT) {
+        if (i >= 0 && i < PID_PROFILE_COUNT) {
             changePidProfile(i);
             cliProfile("");
+        } else {
+            cliPrintErrorLinef("PROFILE OUTSIDE OF [0..%d]", PID_PROFILE_COUNT - 1);
         }
     }
 }
@@ -3346,13 +3705,15 @@ static void cliRateProfile(char *cmdline)
         if (i >= 0 && i < CONTROL_RATE_PROFILE_COUNT) {
             changeControlRateProfile(i);
             cliRateProfile("");
+        } else {
+            cliPrintErrorLinef("RATE PROFILE OUTSIDE OF [0..%d]", CONTROL_RATE_PROFILE_COUNT - 1);
         }
     }
 }
 
 static void cliDumpPidProfile(uint8_t pidProfileIndex, uint8_t dumpMask)
 {
-    if (pidProfileIndex >= MAX_PROFILE_COUNT) {
+    if (pidProfileIndex >= PID_PROFILE_COUNT) {
         // Faulty values
         return;
     }
@@ -3480,6 +3841,7 @@ STATIC_UNIT_TESTED void cliGet(char *cmdline)
             }
             cliPrintVarRange(val);
             cliPrintVarDefault(val);
+
             matchedCommands++;
         }
     }
@@ -3731,9 +4093,11 @@ static void cliStatus(char *cmdline)
                 cliPrint(", ");
             }
             cliPrintf("%s=%s", sensorTypeNames[i], sensorHardware);
+#if defined(USE_ACC)
             if (mask == SENSOR_ACC && acc.dev.revisionCode) {
                 cliPrintf(".%c", acc.dev.revisionCode);
             }
+#endif
         }
     }
     cliPrintLinefeed();
@@ -4047,8 +4411,16 @@ const cliResourceValue_t resourceTable[] = {
 #endif
 #ifdef USE_RX_SPI
     DEFS( OWNER_RX_SPI_CS,     PG_RX_SPI_CONFIG, rxSpiConfig_t, csnTag ),
+    DEFS( OWNER_RX_SPI_EXTI,   PG_RX_SPI_CONFIG, rxSpiConfig_t, extiIoTag ),
     DEFS( OWNER_RX_SPI_BIND,   PG_RX_SPI_CONFIG, rxSpiConfig_t, bindIoTag ),
     DEFS( OWNER_RX_SPI_LED,    PG_RX_SPI_CONFIG, rxSpiConfig_t, ledIoTag ),
+#if defined(USE_RX_SPI_CC2500) && defined(USE_RX_CC2500_SPI_PA_LNA)
+    DEFS( OWNER_RX_SPI_CC2500_TX_EN,   PG_RX_SPI_CC2500_CONFIG, rxCc2500SpiConfig_t, txEnIoTag ),
+    DEFS( OWNER_RX_SPI_CC2500_LNA_EN,  PG_RX_SPI_CC2500_CONFIG, rxCc2500SpiConfig_t, lnaEnIoTag ),
+#if defined(USE_RX_CC2500_SPI_DIVERSITY)
+    DEFS( OWNER_RX_SPI_CC2500_ANT_SEL, PG_RX_SPI_CC2500_CONFIG, rxCc2500SpiConfig_t, antSelIoTag ),
+#endif
+#endif
 #endif
 #ifdef USE_GYRO_EXTI
     DEFW( OWNER_GYRO_EXTI,     PG_GYRO_DEVICE_CONFIG, gyroDeviceConfig_t, extiTag, MAX_GYRODEV_COUNT ),
@@ -4341,7 +4713,7 @@ dmaoptEntry_t dmaoptEntryTable[] = {
 
 static void dmaoptToString(int optval, char *buf)
 {
-    if (optval == -1) {
+    if (optval == DMA_OPT_UNUSED) {
         memcpy(buf, "NONE", DMA_OPT_STRING_BUFSIZE);
     } else {
         tfp_sprintf(buf, "%d", optval);
@@ -4375,14 +4747,17 @@ static void printPeripheralDmaopt(dmaoptEntry_t *entry, int index, uint8_t dumpM
 
     if (defaultConfig) {
         if (defaultOpt != DMA_OPT_UNUSED) {
-            const dmaChannelSpec_t *dmaChannelSpec = dmaGetChannelSpec(entry->peripheral, index, defaultOpt);
+            const dmaChannelSpec_t *dmaChannelSpec = dmaGetChannelSpecByPeripheral(entry->peripheral, index, defaultOpt);
             dmaCode_t dmaCode = 0;
             if (dmaChannelSpec) {
                 dmaCode = dmaChannelSpec->code;
             }
             cliDefaultPrintLinef(dumpMask, equalsDefault,
-                "dmaopt %s %d %d # DMA%d Stream %d Channel %d",
-                entry->device, DMA_OPT_UI_INDEX(index), defaultOpt, DMA_CODE_CONTROLLER(dmaCode), DMA_CODE_STREAM(dmaCode), DMA_CODE_CHANNEL(dmaCode));
+                "dmaopt %s %d %d",
+                entry->device, DMA_OPT_UI_INDEX(index), defaultOpt);
+            cliDefaultPrintLinef(dumpMask, equalsDefault,
+                "# %s %d: DMA%d Stream %d Channel %d",
+                entry->device, DMA_OPT_UI_INDEX(index), DMA_CODE_CONTROLLER(dmaCode), DMA_CODE_STREAM(dmaCode), DMA_CODE_CHANNEL(dmaCode));
         } else {
             cliDefaultPrintLinef(dumpMask, equalsDefault,
                 "dmaopt %s %d NONE",
@@ -4391,14 +4766,18 @@ static void printPeripheralDmaopt(dmaoptEntry_t *entry, int index, uint8_t dumpM
     }
 
     if (currentOpt != DMA_OPT_UNUSED) {
-        const dmaChannelSpec_t *dmaChannelSpec = dmaGetChannelSpec(entry->peripheral, index, currentOpt);
+        cliDumpPrintLinef(dumpMask, equalsDefault,
+            "dmaopt %s %d %d",
+            entry->device, DMA_OPT_UI_INDEX(index), currentOpt);
+
+        const dmaChannelSpec_t *dmaChannelSpec = dmaGetChannelSpecByPeripheral(entry->peripheral, index, currentOpt);
         dmaCode_t dmaCode = 0;
         if (dmaChannelSpec) {
             dmaCode = dmaChannelSpec->code;
         }
         cliDumpPrintLinef(dumpMask, equalsDefault,
-            "dmaopt %s %d %d # DMA%d Stream %d Channel %d",
-            entry->device, DMA_OPT_UI_INDEX(index), currentOpt, DMA_CODE_CONTROLLER(dmaCode), DMA_CODE_STREAM(dmaCode), DMA_CODE_CHANNEL(dmaCode));
+            "# %s %d: DMA%d Stream %d Channel %d",
+            entry->device, DMA_OPT_UI_INDEX(index), DMA_CODE_CONTROLLER(dmaCode), DMA_CODE_STREAM(dmaCode), DMA_CODE_CHANNEL(dmaCode));
     } else {
         if (!(dumpMask & HIDE_UNUSED)) {
             cliDumpPrintLinef(dumpMask, equalsDefault,
@@ -4408,16 +4787,60 @@ static void printPeripheralDmaopt(dmaoptEntry_t *entry, int index, uint8_t dumpM
     }
 }
 
+#if defined(USE_TIMER_MGMT)
+static void printTimerDmaopt(const timerIOConfig_t *timerIoConfig, uint8_t dumpMask)
+{
+    const char *format = "dmaopt pin %c%02d %d";
+
+    const ioTag_t ioTag = timerIoConfig->ioTag;
+
+    if (!ioTag) {
+        return;
+    }
+
+    const dmaoptValue_t dmaopt = timerIoConfig->dmaopt;
+    const timerHardware_t *timer = timerGetByTag(ioTag);
+
+    if (dmaopt != DMA_OPT_UNUSED && !(dumpMask & HIDE_UNUSED)) {
+        cliDumpPrintLinef(dumpMask, false, format,
+            IO_GPIOPortIdxByTag(ioTag) + 'A', IO_GPIOPinIdxByTag(ioTag),
+            dmaopt
+        );
+        const dmaChannelSpec_t *dmaChannelSpec = dmaGetChannelSpecByTimer(timer);
+        dmaCode_t dmaCode = 0;
+        if (dmaChannelSpec) {
+            dmaCode = dmaChannelSpec->code;
+        }
+        cliDumpPrintLinef(dumpMask, false,
+            "# pin %c%02d: DMA%d Stream %d Channel %d",
+            IO_GPIOPortIdxByTag(ioTag) + 'A', IO_GPIOPinIdxByTag(ioTag),
+            DMA_CODE_CONTROLLER(dmaCode), DMA_CODE_STREAM(dmaCode), DMA_CODE_CHANNEL(dmaCode)
+        );
+    } else {
+        if (!(dumpMask & HIDE_UNUSED)) {
+            cliDumpPrintLinef(dumpMask, false,
+                "dmaopt pin %c%02d NONE",
+                IO_GPIOPortIdxByTag(ioTag) + 'A', IO_GPIOPinIdxByTag(ioTag)
+            );
+        }
+    }
+}
+#endif
+
 static void printDmaopt(uint8_t dumpMask)
 {
-    UNUSED(dumpMask); // XXX For now
-
     for (size_t i = 0; i < ARRAYLEN(dmaoptEntryTable); i++) {
         dmaoptEntry_t *entry = &dmaoptEntryTable[i];
         for (int index = 0; index < entry->maxIndex; index++) {
             printPeripheralDmaopt(entry, index, dumpMask);
         }
     }
+
+#if defined(USE_TIMER_MGMT)
+    for (unsigned i = 0; i < MAX_TIMER_PINMAP_COUNT; i++) {
+        printTimerDmaopt(timerIOConfig(i), dumpMask);
+    }
+#endif
 }
 
 static void cliDmaopt(char *cmdline)
@@ -4444,59 +4867,99 @@ static void cliDmaopt(char *cmdline)
             entry = &dmaoptEntryTable[i];
         }
     }
-    if (!entry) {
+    if (!entry && strcasecmp(pch, "pin") != 0) {
         cliPrintLinef("bad device %s", pch);
         return;
     }
 
     // Index
-    pch = strtok_r(NULL, " ", &saveptr);
-    int index = atoi(pch) - 1;
-    if (index < 0 || index >= entry->maxIndex) {
-        cliPrintLinef("bad index %s", pch);
-        return;
-    }
+    dmaoptValue_t orgval = DMA_OPT_UNUSED;
 
-    const pgRegistry_t* pg = pgFind(entry->pgn);
-    const void *currentConfig;
-    if (configIsInCopy) {
-        currentConfig = pg->copy;
+    int index = 0;
+    dmaoptValue_t *optaddr = NULL;
+
+    ioTag_t ioTag = IO_TAG_NONE;
+#if defined(USE_TIMER_MGMT)
+    timerIOConfig_t *timerIoConfig = NULL;
+#endif
+    const timerHardware_t *timer = NULL;
+    pch = strtok_r(NULL, " ", &saveptr);
+    if (entry) {
+        index = atoi(pch) - 1;
+        if (index < 0 || index >= entry->maxIndex) {
+            cliPrintLinef("bad index %s", pch);
+            return;
+        }
+
+        const pgRegistry_t* pg = pgFind(entry->pgn);
+        const void *currentConfig;
+        if (configIsInCopy) {
+            currentConfig = pg->copy;
+        } else {
+            currentConfig = pg->address;
+        }
+        optaddr = (dmaoptValue_t *)((uint8_t *)currentConfig + entry->stride * index + entry->offset);
+        orgval = *optaddr;
     } else {
-        currentConfig = pg->address;
+        // It's a pin
+        if (!pch || !(strToPin(pch, &ioTag) && IOGetByTag(ioTag))) {
+            cliPrintErrorLinef("INVALID PIN: '%s'", pch);
+
+            return;
+        }
+
+        orgval = dmaoptByTag(ioTag);
+#if defined(USE_TIMER_MGMT)
+        timerIoConfig = timerIoConfigByTag(ioTag);
+#endif
+        timer = timerGetByTag(ioTag);
     }
-    dmaoptValue_t *optaddr = (dmaoptValue_t *)((uint8_t *)currentConfig + entry->stride * index + entry->offset);
 
     // opt or list
     pch = strtok_r(NULL, " ", &saveptr);
-
     if (!pch) {
-        if (*optaddr == -1) {
-            cliPrintLinef("%s %d NONE", entry->device, index + 1);
+        if (entry) {
+            if (orgval == DMA_OPT_UNUSED) {
+                cliPrintLinef("%s %d NONE", entry->device, index + 1);
+            } else {
+                cliPrintLinef("%s %d %d", entry->device, index + 1, *optaddr);
+            }
         } else {
-            cliPrintLinef("%s %d %d", entry->device, index + 1, *optaddr);
+            if (orgval == DMA_OPT_UNUSED) {
+                cliPrintLinef("pin %c%02d NONE", IO_GPIOPortIdxByTag(ioTag) + 'A', IO_GPIOPinIdxByTag(ioTag));
+            } else {
+                cliPrintLinef("pin %c%02d %d", IO_GPIOPortIdxByTag(ioTag) + 'A', IO_GPIOPinIdxByTag(ioTag), orgval);
+            }
         }
+
         return;
     } else if (strcasecmp(pch, "list") == 0) {
         // Show possible opts
         const dmaChannelSpec_t *dmaChannelSpec;
-        for (int opt = 0; (dmaChannelSpec = dmaGetChannelSpec(entry->peripheral, index, opt)); opt++) {
-            cliPrintLinef("# %d: DMA%d Stream %d channel %d", opt, DMA_CODE_CONTROLLER(dmaChannelSpec->code), DMA_CODE_STREAM(dmaChannelSpec->code), DMA_CODE_CHANNEL(dmaChannelSpec->code));
+        if (entry) {
+            for (int opt = 0; (dmaChannelSpec = dmaGetChannelSpecByPeripheral(entry->peripheral, index, opt)); opt++) {
+                cliPrintLinef("# %d: DMA%d Stream %d channel %d", opt, DMA_CODE_CONTROLLER(dmaChannelSpec->code), DMA_CODE_STREAM(dmaChannelSpec->code), DMA_CODE_CHANNEL(dmaChannelSpec->code));
+            }
+        } else {
+            for (int opt = 0; (dmaChannelSpec = dmaGetChannelSpecByTimerValue(timer->tim, timer->channel, opt)); opt++) {
+                cliPrintLinef("# %d: DMA%d Stream %d channel %d", opt, DMA_CODE_CONTROLLER(dmaChannelSpec->code), DMA_CODE_STREAM(dmaChannelSpec->code), DMA_CODE_CHANNEL(dmaChannelSpec->code));
+            }
         }
+
         return;
     } else if (pch) {
         int optval;
 
         if (strcasecmp(pch, "none") == 0) {
-            optval = -1;
+            optval = DMA_OPT_UNUSED;
         } else {
             optval = atoi(pch);
-            if (optval < 0) { // XXX Check against opt max? How?
-                cliPrintLinef("bad optnum %s", pch);
+            if (optval < 0 || (entry && optval >= MAX_PERIPHERAL_DMA_OPTIONS) || (!entry && optval >= MAX_TIMER_DMA_OPTIONS)) {
+                cliPrintErrorLinef("BAD DMA OPTION NUMBER '%s'", pch);
+
                 return;
             }
         }
-
-        dmaoptValue_t orgval = *optaddr;
 
         char optvalString[5];
         char orgvalString[5];
@@ -4504,11 +4967,23 @@ static void cliDmaopt(char *cmdline)
         dmaoptToString(orgval, orgvalString);
 
         if (optval != orgval) {
-            *optaddr = optval;
+            if (entry) {
+                *optaddr = optval;
 
-            cliPrintLinef("dmaopt %s %d: changed from %s to %s", entry->device, DMA_OPT_UI_INDEX(index), orgvalString, optvalString);
+                cliPrintLinef("dmaopt %s %d: changed from %s to %s", entry->device, DMA_OPT_UI_INDEX(index), orgvalString, optvalString);
+            } else {
+#if defined(USE_TIMER_MGMT)
+                timerIoConfig->dmaopt = optval;
+#endif
+
+                cliPrintLinef("dmaopt pin %c%02d: changed from %s to %s", IO_GPIOPortIdxByTag(ioTag) + 'A', IO_GPIOPinIdxByTag(ioTag), orgvalString, optvalString);
+            }
         } else {
-            cliPrintLinef("dmaopt %s %d: no change", entry->device, DMA_OPT_UI_INDEX(index), orgvalString);
+            if (entry) {
+                cliPrintLinef("dmaopt %s %d: no change: %s", entry->device, DMA_OPT_UI_INDEX(index), orgvalString);
+            } else {
+                cliPrintLinef("dmaopt %c%02d: no change: %s", IO_GPIOPortIdxByTag(ioTag) + 'A', IO_GPIOPinIdxByTag(ioTag),orgvalString);
+            }
         }
     } else {
         cliPrintLinef("bad option %s", pch);
@@ -4521,13 +4996,7 @@ static void cliDmaopt(char *cmdline)
 
 static void printTimer(uint8_t dumpMask)
 {
-    cliPrintLine("# examples: ");
     const char *format = "timer %c%02d %d";
-    cliPrint("#");
-    cliPrintLinef(format, 'A', 1, 1);
-
-    cliPrint("#");
-    cliPrintLinef(format, 'A', 1, 0);
     
     for (unsigned int i = 0; i < MAX_TIMER_PINMAP_COUNT; i++) {
 
@@ -4539,7 +5008,7 @@ static void printTimer(uint8_t dumpMask)
         }
 
         if (timerIndex != 0 && !(dumpMask & HIDE_UNUSED)) {
-            cliDumpPrintLinef(dumpMask, false, format, 
+            cliDumpPrintLinef(dumpMask, false, format,
                 IO_GPIOPortIdxByTag(ioTag) + 'A', 
                 IO_GPIOPinIdxByTag(ioTag),
                 timerIndex - 1
@@ -4594,12 +5063,12 @@ static void cliTimer(char *cmdline)
         if (strcasecmp(pch, "list") == 0) {
             /* output the list of available options */
             uint8_t index = 0;
-            for (unsigned i = 0; i < USABLE_TIMER_CHANNEL_COUNT; i++) {
-                if (timerHardware[i].tag == ioTag) {
+            for (unsigned i = 0; i < TIMER_CHANNEL_COUNT; i++) {
+                if (TIMER_HARDWARE[i].tag == ioTag) {
                     cliPrintLinef("# %d. TIM%d CH%d",
                         index,
-                        timerGetTIMNumber(timerHardware[i].tim),
-                        CC_INDEX_FROM_CHANNEL(timerHardware[i].channel) + 1
+                        timerGetTIMNumber(TIMER_HARDWARE[i].tim),
+                        CC_INDEX_FROM_CHANNEL(TIMER_HARDWARE[i].channel) + 1
                     );
                     index++;
                 }
@@ -4617,6 +5086,7 @@ static void cliTimer(char *cmdline)
 success:
     timerIOConfigMutable(timerIOIndex)->ioTag = timerIndex == 0 ? IO_TAG_NONE : ioTag;
     timerIOConfigMutable(timerIOIndex)->index = timerIndex;
+    timerIOConfigMutable(timerIOIndex)->dmaopt = DMA_OPT_UNUSED;
 
     cliPrintLine("Success");
     return;
@@ -4663,7 +5133,7 @@ static void printConfig(char *cmdline, bool doDiff)
 
         if (dumpMask & DUMP_ALL) {
             cliMcuId(NULL);
-#if defined(USE_BOARD_INFO) && defined(USE_SIGNATURE)
+#if defined(USE_SIGNATURE)
         cliSignature("");
 #endif
         }
@@ -4677,14 +5147,13 @@ static void printConfig(char *cmdline, bool doDiff)
         cliPrintHashLine("name");
         printName(dumpMask, &pilotConfig_Copy);
 
-#ifdef USE_OSD
-        cliPrintHashLine("display_name");
-        printDisplayName(dumpMask, &pilotConfig_Copy);
-#endif
-
 #ifdef USE_RESOURCE_MGMT
         cliPrintHashLine("resources");
         printResource(dumpMask);
+#if defined(USE_TIMER_MGMT)
+        cliPrintHashLine("timer");
+        printTimer(dumpMask);
+#endif
 #ifdef USE_DMA_SPEC
         cliPrintHashLine("dmaopt");
         printDmaopt(dumpMask);
@@ -4734,13 +5203,13 @@ static void printConfig(char *cmdline, bool doDiff)
 
 #ifdef USE_LED_STRIP_STATUS_MODE
         cliPrintHashLine("led");
-        printLed(dumpMask, ledStripConfig_Copy.ledConfigs, ledStripConfig()->ledConfigs);
+        printLed(dumpMask, ledStripStatusModeConfig_Copy.ledConfigs, ledStripStatusModeConfig()->ledConfigs);
 
         cliPrintHashLine("color");
-        printColor(dumpMask, ledStripConfig_Copy.colors, ledStripConfig()->colors);
+        printColor(dumpMask, ledStripStatusModeConfig_Copy.colors, ledStripStatusModeConfig()->colors);
 
         cliPrintHashLine("mode_color");
-        printModeColor(dumpMask, &ledStripConfig_Copy, ledStripConfig());
+        printModeColor(dumpMask, &ledStripStatusModeConfig_Copy, ledStripStatusModeConfig());
 #endif
 
         cliPrintHashLine("aux");
@@ -4757,14 +5226,24 @@ static void printConfig(char *cmdline, bool doDiff)
         printVtx(dumpMask, &vtxConfig_Copy, vtxConfig());
 #endif
 
+#ifdef USE_VTX_TABLE
+        cliPrintHashLine("vtxtable");
+        printVtxTable(dumpMask, &vtxTableConfig_Copy, vtxTableConfig());
+#endif
+
         cliPrintHashLine("rxfail");
         printRxFailsafe(dumpMask, rxFailsafeChannelConfigs_CopyArray, rxFailsafeChannelConfigs(0));
+
+#ifdef USE_OSD
+        cliPrintHashLine("display_name");
+        printDisplayName(dumpMask, &pilotConfig_Copy);
+#endif
 
         cliPrintHashLine("master");
         dumpAllValues(MASTER_VALUE, dumpMask);
 
         if (dumpMask & DUMP_ALL) {
-            for (uint32_t pidProfileIndex = 0; pidProfileIndex < MAX_PROFILE_COUNT; pidProfileIndex++) {
+            for (uint32_t pidProfileIndex = 0; pidProfileIndex < PID_PROFILE_COUNT; pidProfileIndex++) {
                 cliDumpPidProfile(pidProfileIndex, dumpMask);
             }
             cliPrintHashLine("restore original profile selection");
@@ -4988,7 +5467,7 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("servo", "configure servos", NULL, cliServo),
 #endif
     CLI_COMMAND_DEF("set", "change setting", "[<name>=<value>]", cliSet),
-#if defined(USE_BOARD_INFO) && defined(USE_SIGNATURE)
+#if defined(USE_SIGNATURE)
     CLI_COMMAND_DEF("signature", "get / set the board type signature", "[signature]", cliSignature),
 #endif
 #ifdef USE_SERVOS
@@ -5007,6 +5486,9 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("version", "show version", NULL, cliVersion),
 #ifdef USE_VTX_CONTROL
     CLI_COMMAND_DEF("vtx", "vtx channels on switch", NULL, cliVtx),
+#endif
+#ifdef USE_VTX_TABLE
+    CLI_COMMAND_DEF("vtxtable", "vtx frequency able", "<band> <bandname> <bandletter> <freq> ... <freq>\r\n", cliVtxTable),
 #endif
 };
 
@@ -5109,10 +5591,11 @@ void cliProcess(void)
                         break;
                     }
                 }
-                if (cmd < cmdTable + ARRAYLEN(cmdTable))
+                if (cmd < cmdTable + ARRAYLEN(cmdTable)) {
                     cmd->func(options);
-                else
-                    cliPrint("Unknown command, try 'help'");
+                } else {
+                    cliPrintError("UNKNOWN COMMAND, TRY 'HELP'");
+                }
                 bufferIndex = 0;
             }
 
