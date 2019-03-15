@@ -199,7 +199,7 @@
     //#if ((FLASH_SIZE > 256) || (FEATURE_CUT_LEVEL < 8))
     #define USE_LAUNCH_CONTROL
     #define USE_DYN_LPF
-    #define USE_D_CUT
+    #define USE_D_MIN
     //#endif
 
     //#if ((FLASH_SIZE > 256) || (FEATURE_CUT_LEVEL < 7))
@@ -301,7 +301,7 @@
 #define USE_TELEMETRY_SENSORS_DISABLED_DETAILS
 // Re-enable this after 4.0 has been released, and remove the define from STM32F4DISCOVERY
 //#define USE_VTX_TABLE
-#endif
+//#endif
 
 #define USE_THRUST_LINEARIZATION
 #define USE_INTEGRATED_YAW_CONTROL
