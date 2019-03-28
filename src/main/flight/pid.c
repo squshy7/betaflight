@@ -254,6 +254,7 @@ typedef union dtermLowpass_u {
 } dtermLowpass_t;
 
 static FAST_RAM_ZERO_INIT float previousPidSetpoint[XYZ_AXIS_COUNT];
+static FAST_RAM_ZERO_INIT float previousRcDeflection[XYZ_AXIS_COUNT];
 
 static FAST_RAM_ZERO_INIT filterApplyFnPtr dtermNotchApplyFn;
 static FAST_RAM_ZERO_INIT biquadFilter_t dtermNotch[XYZ_AXIS_COUNT];
@@ -1370,9 +1371,13 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         pidData[axis].I = constrainf(previousIterm + Ki * itermErrorRate * dynCi, -itermLimit, itermLimit);
 
         // -----calculate pidSetpointDelta
-        float pidSetpointDelta = 0;
-        pidSetpointDelta = currentPidSetpoint - previousPidSetpoint[axis];
+//        float pidSetpointDelta = 0;
+//        pidSetpointDelta = currentPidSetpoint - previousPidSetpoint[axis];
         previousPidSetpoint[axis] = currentPidSetpoint;
+
+        const float deflection = getRcDeflection(axis) * 1000.0f;
+        float pidSetpointDelta = deflection - previousRcDeflection[axis];
+        previousRcDeflection[axis] = deflection;
 
 #ifdef USE_RC_SMOOTHING_FILTER
         pidSetpointDelta = applyRcSmoothingDerivativeFilter(axis, pidSetpointDelta);
@@ -1426,8 +1431,8 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         const float feedforwardGain = (flightModeFlags || launchControlActive) ? 0.0f : pidCoefficient[axis].Kf;
         if (feedforwardGain > 0) {
             // If feedforward is helping (pushing the same direction as setpoint) then the
-            // stick is moving away from center to start teh move - use 100% feedforward.
-            // Otherwise stick is returning to center so scle feedforward effect.
+            // stick is moving away from center to start the move - use 100% feedforward.
+            // Otherwise stick is returning to center so scale feedforward effect.
             const float stickDirectionFactor = (currentPidSetpoint * pidSetpointDelta > 0) ? 1.0f : feedForwardReturnFactor;
             // no transition if feedForwardTransition == 0
             float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1;
