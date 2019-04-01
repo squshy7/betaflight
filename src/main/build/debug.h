@@ -101,6 +101,10 @@ typedef enum {
     DEBUG_D_MIN,
     DEBUG_AC_CORRECTION,
     DEBUG_AC_ERROR,
+<<<<<<< HEAD
+=======
+    DEBUG_FF_THUMB,
+>>>>>>> joelucid/jflight
     DEBUG_COUNT
 } debugType_e;
 
