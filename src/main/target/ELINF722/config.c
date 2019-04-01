@@ -18,31 +18,24 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#pragma once
+#include <stdbool.h>
+#include <stdint.h>
 
-#include "drivers/pwm_output.h"
+#include "platform.h"
+#include "drivers/serial.h"
+#include "pg/rx.h"
+#include "pg/piniobox.h"
+#include "rx/rx.h"
+#include "telemetry/telemetry.h"
+#include "fc/config.h"
 
-#define ESCSERIAL_BUFFER_SIZE 1024
+#ifdef USE_TARGET_CONFIG
+#include "pg/pg.h"
 
-typedef enum {
-    ESCSERIAL1 = 0,
-    ESCSERIAL2
-} escSerialPortIndex_e;
-
-typedef enum {
-    PROTOCOL_SIMONK = 0,
-    PROTOCOL_BLHELI = 1,
-    PROTOCOL_KISS = 2,
-    PROTOCOL_KISSALL = 3,
-    PROTOCOL_CASTLE = 4,
-    PROTOCOL_COUNT
-} escProtocol_e;
-
-// serialPort API
-bool escEnablePassthrough(serialPort_t *escPassthroughPort, const motorDevConfig_t *motorConfig, uint16_t escIndex, uint8_t mode);
-
-typedef struct escSerialConfig_s {
-    ioTag_t ioTag;
-} escSerialConfig_t;
-
-PG_DECLARE(escSerialConfig_t, escSerialConfig);
+void targetConfiguration(void)
+{
+    rxConfigMutable()->halfDuplex = true;
+    pinioBoxConfigMutable()->permanentId[0] = 40;
+    pinioBoxConfigMutable()->permanentId[1] = 41;
+}
+#endif

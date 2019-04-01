@@ -18,31 +18,22 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#pragma once
+#include <stdint.h>
 
-#include "drivers/pwm_output.h"
+#include "platform.h"
+#include "drivers/io.h"
 
-#define ESCSERIAL_BUFFER_SIZE 1024
+#include "drivers/dma.h"
+#include "drivers/timer.h"
+#include "drivers/timer_def.h"
 
-typedef enum {
-    ESCSERIAL1 = 0,
-    ESCSERIAL2
-} escSerialPortIndex_e;
-
-typedef enum {
-    PROTOCOL_SIMONK = 0,
-    PROTOCOL_BLHELI = 1,
-    PROTOCOL_KISS = 2,
-    PROTOCOL_KISSALL = 3,
-    PROTOCOL_CASTLE = 4,
-    PROTOCOL_COUNT
-} escProtocol_e;
-
-// serialPort API
-bool escEnablePassthrough(serialPort_t *escPassthroughPort, const motorDevConfig_t *motorConfig, uint16_t escIndex, uint8_t mode);
-
-typedef struct escSerialConfig_s {
-    ioTag_t ioTag;
-} escSerialConfig_t;
-
-PG_DECLARE(escSerialConfig_t, escSerialConfig);
+const timerHardware_t timerHardware[USABLE_TIMER_CHANNEL_COUNT] = {
+    DEF_TIM(TIM3,  CH3,  PB0, TIM_USE_MOTOR, 0, 0),
+    DEF_TIM(TIM3,  CH4,  PB1, TIM_USE_MOTOR, 0, 0),
+    DEF_TIM(TIM2,  CH4,  PA3, TIM_USE_MOTOR, 0, 1),
+    DEF_TIM(TIM2,  CH3,  PA2, TIM_USE_MOTOR, 0, 0),
+    DEF_TIM(TIM1,  CH1,  PA8, TIM_USE_ANY,   0, 0),
+    DEF_TIM(TIM8,  CH4,  PC9, TIM_USE_ANY,   0, 0),
+    DEF_TIM(TIM4,  CH1,  PB6, TIM_USE_PPM | TIM_USE_LED,   0, 0),
+    DEF_TIM(TIM4,  CH2,  PB7, TIM_USE_CAMERA_CONTROL, 0, 0),
+};
