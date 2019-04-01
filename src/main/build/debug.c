@@ -85,8 +85,5 @@ const char * const debugModeNames[DEBUG_COUNT] = {
     "D_MIN",
     "AC_CORRECTION",
     "AC_ERROR",
-<<<<<<< HEAD
-=======
     "FF_THUMB",
->>>>>>> joelucid/jflight
 };

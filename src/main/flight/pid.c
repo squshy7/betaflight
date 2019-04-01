@@ -1407,6 +1407,8 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         static float ffProjectedSetpoint[XYZ_AXIS_COUNT];
         static float oldRawSetpoint[XYZ_AXIS_COUNT];
         float pidSetpointDelta = 0;
+        //float commandedInputDelta;
+
         if (ffFromInterpolatedSetpoint) {
             static float oldRawDeflection[XYZ_AXIS_COUNT];
             static uint16_t interpolationSteps[XYZ_AXIS_COUNT];
@@ -1438,15 +1440,6 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
                 oldRawSetpoint[axis] = rawSetpoint;
                 oldRawDeflection[axis] = rawDeflection;
             }
-        float commandedInputDelta;
-        if (feedForwardType == FEEDFORWARD_TYPE_LINEAR) {
-            const float stickDeflectionFactor = getRcDeflection(axis) * feedForwardLinearScale;
-            commandedInputDelta = stickDeflectionFactor - previousStickDeflectionFactor[axis];
-            previousStickDeflectionFactor[axis] = stickDeflectionFactor;
-        } else {  // CLASSIC feedforward
-            commandedInputDelta = currentPidSetpoint - previousPidSetpoint[axis];
-        }
-        previousPidSetpoint[axis] = currentPidSetpoint; // we need this for logging even if using LINEAR feedforward
 
             if (interpolationSteps[axis]) {
                 pidSetpointDelta = setpointChangePerIteration[axis];
@@ -1455,13 +1448,19 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
                 ffDeflectionReservoir[axis] -= deflectionChangePerIteration[axis];
             }
         }
-        else {
+        if (feedForwardType == FEEDFORWARD_TYPE_LINEAR) {
+            const float stickDeflectionFactor = getRcDeflection(axis) * feedForwardLinearScale;
+            pidSetpointDelta = stickDeflectionFactor - previousStickDeflectionFactor[axis];
+            previousStickDeflectionFactor[axis] = stickDeflectionFactor;
+        }
+        else { // CLASSIC feedforward
             pidSetpointDelta = currentPidSetpoint - previousPidSetpoint[axis];
         }
-        previousPidSetpoint[axis] = currentPidSetpoint;
+
+        previousPidSetpoint[axis] = currentPidSetpoint; // we need this for logging even if using LINEAR feedforward
 
 #ifdef USE_RC_SMOOTHING_FILTER
-        commandedInputDelta = applyRcSmoothingDerivativeFilter(axis, commandedInputDelta);
+        pidSetpointDelta = applyRcSmoothingDerivativeFilter(axis, pidSetpointDelta);
 #endif // USE_RC_SMOOTHING_FILTER
 
         // -----calculate D component
@@ -1487,7 +1486,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             if (dMinPercent[axis] > 0) {
                 float dMinGyroFactor = biquadFilterApply(&dMinRange[axis], delta);
                 dMinGyroFactor = fabsf(dMinGyroFactor) * dMinGyroGain;
-                const float dMinSetpointFactor = (fabsf(commandedInputDelta)) * dMinSetpointGain;
+                const float dMinSetpointFactor = (fabsf(pidSetpointDelta)) * dMinSetpointGain;
                 dMinFactor = MAX(dMinGyroFactor, dMinSetpointFactor);
                 dMinFactor = dMinPercent[axis] + (1.0f - dMinPercent[axis]) * dMinFactor;
                 dMinFactor = pt1FilterApply(&dMinLowpass[axis], dMinFactor);
@@ -1516,10 +1515,12 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         // Only enable feedforward for rate mode and if launch control is inactive
         const float feedforwardGain = (flightModeFlags || launchControlActive) ? 0.0f : pidCoefficient[axis].Kf;
         if (feedforwardGain > 0) {
+
             // If feedforward is helping (pushing the same direction as setpoint) then the
             // stick is moving away from center to start the move - use 100% feedforward.
             // Otherwise stick is returning to center so scale feedforward effect.
-            const float stickDirectionFactor = (currentPidSetpoint * commandedInputDelta > 0) ? 1.0f : feedForwardReturnFactor;
+            const float stickDirectionFactor = (currentPidSetpoint * pidSetpointDelta > 0) ? 1.0f : feedForwardReturnFactor;
+
             // no transition if feedForwardTransition == 0
             float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1;
             pidData[axis].F = feedforwardGain * transition * pidSetpointDelta * pidFrequency;
@@ -1560,7 +1561,8 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
                     pidData[axis].F = constrainf(pidData[axis].F, -limit, limit);
                 }
             }
-            pidData[axis].F = feedforwardGain * transition * stickDirectionFactor * commandedInputDelta * pidFrequency;
+
+            pidData[axis].F = feedforwardGain * transition * stickDirectionFactor * pidSetpointDelta * pidFrequency;
 
 #if defined(USE_SMART_FEEDFORWARD)
             applySmartFeedforward(axis);
