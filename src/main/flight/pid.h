@@ -99,6 +99,11 @@ typedef enum {
     ITERM_RELAX_SETPOINT
 } itermRelaxType_e;
 
+typedef enum {
+    FEEDFORWARD_TYPE_CLASSIC,
+    FEEDFORWARD_TYPE_LINEAR
+} feedforwardType_e;
+
 typedef struct pidProfile_s {
     uint16_t yaw_lowpass_hz;                // Additional yaw filter when yaw axis too noisy
     uint16_t dterm_lowpass_hz;              // Delta Filter in hz
@@ -172,6 +177,9 @@ typedef struct pidProfile_s {
     uint16_t ff_max_rate;                    // Max implied setpoint rate to allow for FF
     uint8_t ff_min_spread;                  // Spread ff out over at least min spread ms
     uint8_t ff_thumb_limit;                 // FF limit based on stick speed
+    uint8_t feedforward_return_factor;      // The percentage of feedforward used when stick is returning to center
+    uint8_t feedforward_type;               // The feedforward calculation type. CLASSIC = based on setpoint, LINEAR = based on stick deflection
+    uint16_t feedforward_linear_scale;      // Used to scale the linear input delta into the expected range for feedforward effect
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);
@@ -246,4 +254,3 @@ float calcHorizonLevelStrength(void);
 void dynLpfDTermUpdate(float throttle);
 void pidSetItermReset(bool enabled);
 float pidGetPreviousSetpoint(int axis);
-

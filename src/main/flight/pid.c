@@ -205,6 +205,9 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .ff_max_rate = 0,
         .ff_thumb_limit = 0,
         .ff_min_spread = 0,
+        .feedforward_return_factor = 100,
+        .feedforward_type = FEEDFORWARD_TYPE_CLASSIC,
+        .feedforward_linear_scale = 1000,
     );
 #ifdef USE_DYN_LPF
     pidProfile->dterm_lowpass_hz = 0;
@@ -257,6 +260,7 @@ typedef union dtermLowpass_u {
 } dtermLowpass_t;
 
 static FAST_RAM_ZERO_INIT float previousPidSetpoint[XYZ_AXIS_COUNT];
+static FAST_RAM_ZERO_INIT float previousStickDeflectionFactor[XYZ_AXIS_COUNT];
 
 static FAST_RAM_ZERO_INIT filterApplyFnPtr dtermNotchApplyFn;
 static FAST_RAM_ZERO_INIT biquadFilter_t dtermNotch[XYZ_AXIS_COUNT];
@@ -570,6 +574,9 @@ static FAST_RAM_ZERO_INIT bool  ffFromInterpolatedSetpoint;
 static FAST_RAM_ZERO_INIT float ffMaxImpliedRate;
 static FAST_RAM_ZERO_INIT float ffThumbLimit;
 static FAST_RAM_ZERO_INIT float ffMinSpread;
+static FAST_RAM_ZERO_INIT float feedForwardReturnFactor;
+static FAST_RAM_ZERO_INIT uint8_t feedForwardType;
+static FAST_RAM_ZERO_INIT uint16_t feedForwardLinearScale;
 
 void pidInitConfig(const pidProfile_t *pidProfile)
 {
@@ -619,7 +626,7 @@ void pidInitConfig(const pidProfile_t *pidProfile)
 #endif
     itermRotation = pidProfile->iterm_rotation;
     antiGravityMode = pidProfile->antiGravityMode;
-    
+
     // Calculate the anti-gravity value that will trigger the OSD display.
     // For classic AG it's either 1.0 for off and > 1.0 for on.
     // For the new AG it's a continuous floating value so we want to trigger the OSD
@@ -697,7 +704,7 @@ void pidInitConfig(const pidProfile_t *pidProfile)
         thrustLinearizationReciprocal = 1.0f / thrustLinearization;
         thrustLinearizationB = (1.0f - thrustLinearization) / (2.0f * thrustLinearization);
     }
-#endif    
+#endif
 #if defined(USE_D_MIN)
     for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
         const uint8_t dMin = pidProfile->d_min[axis];
@@ -718,6 +725,10 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     ffThumbLimit = pidProfile->ff_thumb_limit * 0.0001;
     ffFromInterpolatedSetpoint = pidProfile->ff_from_interpolated_sp;
     ffMinSpread = pidProfile->ff_min_spread;
+
+    feedForwardReturnFactor = pidProfile->feedforward_return_factor / 100.0f;
+    feedForwardType = pidProfile->feedforward_type;
+    feedForwardLinearScale = pidProfile->feedforward_linear_scale;
 }
 
 void pidInit(const pidProfile_t *pidProfile)
@@ -962,7 +973,7 @@ static FAST_CODE_NOINLINE float applyAcroTrainer(int axis, const rollAndPitchTri
         if (acroTrainerAxisState[axis] != 0) {
             ret = constrainf(((acroTrainerAngleLimit * angleSign) - currentAngle) * acroTrainerGain, -ACRO_TRAINER_SETPOINT_LIMIT, ACRO_TRAINER_SETPOINT_LIMIT);
         } else {
-        
+
         // Not currently over the limit so project the angle based on current angle and
         // gyro angular rate using a sliding window based on gyro rate (faster rotation means larger window.
         // If the projected angle exceeds the limit then apply limiting to minimize overshoot.
@@ -979,7 +990,7 @@ static FAST_CODE_NOINLINE float applyAcroTrainer(int axis, const rollAndPitchTri
         if (resetIterm) {
             pidData[axis].I = 0;
         }
- 
+
         if (axis == acroTrainerDebugAxis) {
             DEBUG_SET(DEBUG_ACRO_TRAINER, 0, lrintf(currentAngle * 10.0f));
             DEBUG_SET(DEBUG_ACRO_TRAINER, 1, acroTrainerAxisState[axis]);
@@ -1099,7 +1110,7 @@ STATIC_UNIT_TESTED void applyAbsoluteControl(const int axis, const float gyroRat
         const float gminac = setpointLpf - 2 * setpointHpf;
         if (gyroRate >= gminac && gyroRate <= gmaxac) {
             acErrorRate = 0;
-            
+
             /* const float acErrorRate1 = gmaxac - gyroRate; */
             /* const float acErrorRate2 = gminac - gyroRate; */
             /* if (acErrorRate1 * axisError[axis] < 0) { */
@@ -1137,11 +1148,7 @@ STATIC_UNIT_TESTED void applyItermRelax(const int axis, const float iterm,
     const float setpointHpf = fabsf(*currentPidSetpoint - setpointLpf);
 
     if (itermRelax) {
-<<<<<<< HEAD
         if (axis < FD_YAW || itermRelax == ITERM_RELAX_RPY || itermRelax == ITERM_RELAX_RPY_INC) {
-=======
-        if ((axis < FD_YAW || itermRelax == ITERM_RELAX_RPY || itermRelax == ITERM_RELAX_RPY_INC)) {
->>>>>>> joelucid/jflight
             const float itermRelaxFactor = MAX(0, 1 - setpointHpf / itermRelaxSetpointThreshold);
             const bool isDecreasingI =
                 ((iterm > 0) && (*itermErrorRate < 0)) || ((iterm < 0) && (*itermErrorRate > 0));
@@ -1154,22 +1161,16 @@ STATIC_UNIT_TESTED void applyItermRelax(const int axis, const float iterm,
             } else {
                 *itermErrorRate = 0.0f;
             }
-<<<<<<< HEAD
 
-=======
-            
->>>>>>> joelucid/jflight
+
             if (axis == FD_ROLL) {
                 DEBUG_SET(DEBUG_ITERM_RELAX, 0, lrintf(setpointHpf));
                 DEBUG_SET(DEBUG_ITERM_RELAX, 1, lrintf(itermRelaxFactor * 100.0f));
                 DEBUG_SET(DEBUG_ITERM_RELAX, 2, lrintf(*itermErrorRate));
             }
         }
-<<<<<<< HEAD
 
-=======
-        
->>>>>>> joelucid/jflight
+
 #if defined(USE_ABSOLUTE_CONTROL)
         applyAbsoluteControl(axis, gyroRate, currentPidSetpoint, itermErrorRate);
 #endif
@@ -1437,6 +1438,15 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
                 oldRawSetpoint[axis] = rawSetpoint;
                 oldRawDeflection[axis] = rawDeflection;
             }
+        float commandedInputDelta;
+        if (feedForwardType == FEEDFORWARD_TYPE_LINEAR) {
+            const float stickDeflectionFactor = getRcDeflection(axis) * feedForwardLinearScale;
+            commandedInputDelta = stickDeflectionFactor - previousStickDeflectionFactor[axis];
+            previousStickDeflectionFactor[axis] = stickDeflectionFactor;
+        } else {  // CLASSIC feedforward
+            commandedInputDelta = currentPidSetpoint - previousPidSetpoint[axis];
+        }
+        previousPidSetpoint[axis] = currentPidSetpoint; // we need this for logging even if using LINEAR feedforward
 
             if (interpolationSteps[axis]) {
                 pidSetpointDelta = setpointChangePerIteration[axis];
@@ -1449,9 +1459,9 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             pidSetpointDelta = currentPidSetpoint - previousPidSetpoint[axis];
         }
         previousPidSetpoint[axis] = currentPidSetpoint;
-        
+
 #ifdef USE_RC_SMOOTHING_FILTER
-        pidSetpointDelta = applyRcSmoothingDerivativeFilter(axis, pidSetpointDelta);
+        commandedInputDelta = applyRcSmoothingDerivativeFilter(axis, commandedInputDelta);
 #endif // USE_RC_SMOOTHING_FILTER
 
         // -----calculate D component
@@ -1477,7 +1487,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             if (dMinPercent[axis] > 0) {
                 float dMinGyroFactor = biquadFilterApply(&dMinRange[axis], delta);
                 dMinGyroFactor = fabsf(dMinGyroFactor) * dMinGyroGain;
-                const float dMinSetpointFactor = (fabsf(pidSetpointDelta)) * dMinSetpointGain;
+                const float dMinSetpointFactor = (fabsf(commandedInputDelta)) * dMinSetpointGain;
                 dMinFactor = MAX(dMinGyroFactor, dMinSetpointFactor);
                 dMinFactor = dMinPercent[axis] + (1.0f - dMinPercent[axis]) * dMinFactor;
                 dMinFactor = pt1FilterApply(&dMinLowpass[axis], dMinFactor);
@@ -1506,6 +1516,10 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         // Only enable feedforward for rate mode and if launch control is inactive
         const float feedforwardGain = (flightModeFlags || launchControlActive) ? 0.0f : pidCoefficient[axis].Kf;
         if (feedforwardGain > 0) {
+            // If feedforward is helping (pushing the same direction as setpoint) then the
+            // stick is moving away from center to start the move - use 100% feedforward.
+            // Otherwise stick is returning to center so scale feedforward effect.
+            const float stickDirectionFactor = (currentPidSetpoint * commandedInputDelta > 0) ? 1.0f : feedForwardReturnFactor;
             // no transition if feedForwardTransition == 0
             float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1;
             pidData[axis].F = feedforwardGain * transition * pidSetpointDelta * pidFrequency;
@@ -1546,6 +1560,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
                     pidData[axis].F = constrainf(pidData[axis].F, -limit, limit);
                 }
             }
+            pidData[axis].F = feedforwardGain * transition * stickDirectionFactor * commandedInputDelta * pidFrequency;
 
 #if defined(USE_SMART_FEEDFORWARD)
             applySmartFeedforward(axis);
@@ -1558,7 +1573,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         if (yawSpinActive) {
             pidData[axis].I = 0;  // in yaw spin always disable I
             if (axis <= FD_PITCH)  {
-                // zero PIDs on pitch and roll leaving yaw P to correct spin 
+                // zero PIDs on pitch and roll leaving yaw P to correct spin
                 pidData[axis].P = 0;
                 pidData[axis].D = 0;
                 pidData[axis].F = 0;
