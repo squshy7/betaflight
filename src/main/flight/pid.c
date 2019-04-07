@@ -1418,6 +1418,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             static float ffDeflectionReservoir[XYZ_AXIS_COUNT];
             float rawSetpoint = getRawSetpoint(axis);
             float rawDeflection = getRawDeflection(axis);
+
             if (rawDeflection != oldRawDeflection[axis]) {
                 // calculate the inertia based limit
                 ffDeflectionReservoir[axis] += rawDeflection - oldRawDeflection[axis];
