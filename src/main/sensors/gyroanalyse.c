@@ -272,13 +272,9 @@ static FAST_CODE_NOINLINE void gyroDataAnalyseUpdate(gyroAnalyseState_t *state, 
             float dataMax = 0;
             uint8_t binStart = 0;
             uint8_t binMax = 0;
-<<<<<<< HEAD
+
             //for bins after initial decline, identify start bin and max bin
-            for (int i = 1 + fftBinOffset; i < FFT_BIN_COUNT; i++) {
-=======
-            //for bins after initial decline, identify start bin and max bin 
             for (int i = fftStartBin; i < FFT_BIN_COUNT; i++) {
->>>>>>> upstream/master
                 if (fftIncreased || (state->fftData[i] > state->fftData[i - 1])) {
                     if (!fftIncreased) {
                         binStart = i; // first up-step bin
