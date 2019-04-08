@@ -208,6 +208,7 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .ff_max_rate = 0,
         .ff_thumb_limit = 0,
         .ff_min_spread = 0,
+        .feedforward_return_factor = 100,
     );
 #ifndef USE_D_MIN
     pidProfile->pid[PID_ROLL].D = 30;
@@ -567,6 +568,7 @@ static FAST_RAM_ZERO_INIT bool  ffFromInterpolatedSetpoint;
 static FAST_RAM_ZERO_INIT float ffMaxImpliedRate;
 static FAST_RAM_ZERO_INIT float ffThumbLimit;
 static FAST_RAM_ZERO_INIT float ffMinSpread;
+static FAST_RAM_ZERO_INIT float feedForwardReturnFactor;
 
 void pidInitConfig(const pidProfile_t *pidProfile)
 {
@@ -715,6 +717,7 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     ffThumbLimit = pidProfile->ff_thumb_limit * 0.0001;
     ffFromInterpolatedSetpoint = pidProfile->ff_from_interpolated_sp;
     ffMinSpread = pidProfile->ff_min_spread;
+    feedForwardReturnFactor = pidProfile->feedforward_return_factor / 100.0f;
 }
 
 void pidInit(const pidProfile_t *pidProfile)
@@ -1491,9 +1494,13 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
         // Only enable feedforward for rate mode and if launch control is inactive
         const float feedforwardGain = (flightModeFlags || launchControlActive) ? 0.0f : pidCoefficient[axis].Kf;
         if (feedforwardGain > 0) {
+            // If feedforward is helping (pushing the same direction as setpoint) then the
+            // stick is moving away from center to start teh move - use 100% feedforward.
+            // Otherwise stick is returning to center so scle feedforward effect.
+            const float stickDirectionFactor = (currentPidSetpoint * pidSetpointDelta > 0) ? 1.0f : feedForwardReturnFactor;
             // no transition if feedForwardTransition == 0
             float transition = feedForwardTransition > 0 ? MIN(1.f, getRcDeflectionAbs(axis) * feedForwardTransition) : 1;
-            pidData[axis].F = feedforwardGain * transition * pidSetpointDelta * pidFrequency;
+            pidData[axis].F = feedforwardGain * transition * stickDirectionFactor * pidSetpointDelta * pidFrequency;
             if (axis == FD_ROLL) {
                 DEBUG_SET(DEBUG_FF_THUMB, 0, pidData[axis].F);
             }
