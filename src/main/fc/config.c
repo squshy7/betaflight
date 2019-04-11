@@ -190,34 +190,26 @@ static void validateAndFixConfig(void)
         featureDisable(FEATURE_GPS);
     }
 
-    if (systemConfig()->activeRateProfile >= CONTROL_RATE_PROFILE_COUNT) {
-        systemConfigMutable()->activeRateProfile = 0;
-    }
-    loadControlRateProfile();
-
-    if (systemConfig()->pidProfileIndex >= PID_PROFILE_COUNT) {
-        systemConfigMutable()->pidProfileIndex = 0;
-    }
-    loadPidProfile();
-
-    // Prevent invalid notch cutoff
-    if (currentPidProfile->dterm_notch_cutoff >= currentPidProfile->dterm_notch_hz) {
-        currentPidProfile->dterm_notch_hz = 0;
-    }
+    for (unsigned i = 0; i < PID_PROFILE_COUNT; i++) {
+        // Prevent invalid notch cutoff
+        if (pidProfilesMutable(i)->dterm_notch_cutoff >= pidProfilesMutable(i)->dterm_notch_hz) {
+            pidProfilesMutable(i)->dterm_notch_hz = 0;
+        }
 
 #ifdef USE_DYN_LPF
-    //PRevent invalid dynamic lowpass
-    if (currentPidProfile->dyn_lpf_dterm_min_hz > currentPidProfile->dyn_lpf_dterm_max_hz) {
-        currentPidProfile->dyn_lpf_dterm_min_hz = 0;
-    }
+        //Prevent invalid dynamic lowpass
+        if (pidProfilesMutable(i)->dyn_lpf_dterm_min_hz > pidProfilesMutable(i)->dyn_lpf_dterm_max_hz) {
+            pidProfilesMutable(i)->dyn_lpf_dterm_min_hz = 0;
+        }
 #endif
 
-    if (currentPidProfile->motor_output_limit > 100 || currentPidProfile->motor_output_limit == 0) {
-        currentPidProfile->motor_output_limit = 100;
-    }
+        if (pidProfilesMutable(i)->motor_output_limit > 100 || pidProfilesMutable(i)->motor_output_limit == 0) {
+            pidProfilesMutable(i)->motor_output_limit = 100;
+        }
 
-    if (currentPidProfile->auto_profile_cell_count > MAX_AUTO_DETECT_CELL_COUNT || currentPidProfile->auto_profile_cell_count < AUTO_PROFILE_CELL_COUNT_CHANGE) {
-        currentPidProfile->auto_profile_cell_count = AUTO_PROFILE_CELL_COUNT_STAY;
+        if (pidProfilesMutable(i)->auto_profile_cell_count > MAX_AUTO_DETECT_CELL_COUNT || pidProfilesMutable(i)->auto_profile_cell_count < AUTO_PROFILE_CELL_COUNT_CHANGE) {
+            pidProfilesMutable(i)->auto_profile_cell_count = AUTO_PROFILE_CELL_COUNT_STAY;
+        }
     }
 
     if (motorConfig()->dev.motorPwmProtocol == PWM_TYPE_BRUSHED) {
@@ -441,9 +433,31 @@ static void validateAndFixConfig(void)
 #endif
 
 #if defined(USE_DSHOT_TELEMETRY)
-    if ((motorConfig()->dev.useBurstDshot || !systemConfig()->schedulerOptimizeRate)
+    bool usingDshotProtocol;
+    switch (motorConfig()->dev.motorPwmProtocol) {
+    case PWM_TYPE_PROSHOT1000:
+    case PWM_TYPE_DSHOT1200:
+    case PWM_TYPE_DSHOT600:
+    case PWM_TYPE_DSHOT300:
+    case PWM_TYPE_DSHOT150:
+        usingDshotProtocol = true;
+        break;
+    default:
+        usingDshotProtocol = false;
+        break;
+    }
+
+    if ((!usingDshotProtocol || motorConfig()->dev.useBurstDshot || !systemConfig()->schedulerOptimizeRate)
         && motorConfig()->dev.useDshotTelemetry) {
         motorConfigMutable()->dev.useDshotTelemetry = false;
+    }
+#endif
+
+    // Temporary workaround until RPM Filter supports dual-gyro using both sensors
+    // Once support is added remove this block
+#if defined(USE_MULTI_GYRO) && defined(USE_RPM_FILTER)
+    if (gyroConfig()->gyro_to_use == GYRO_CONFIG_USE_GYRO_BOTH && isRpmFilterEnabled()) {
+        gyroConfigMutable()->gyro_to_use = GYRO_CONFIG_USE_GYRO_1;
     }
 #endif
 
@@ -560,6 +574,16 @@ void validateAndFixGyroConfig(void)
     }
 #endif // USE_SDCARD
 #endif // USE_BLACKBOX
+
+    if (systemConfig()->activeRateProfile >= CONTROL_RATE_PROFILE_COUNT) {
+        systemConfigMutable()->activeRateProfile = 0;
+    }
+    loadControlRateProfile();
+
+    if (systemConfig()->pidProfileIndex >= PID_PROFILE_COUNT) {
+        systemConfigMutable()->pidProfileIndex = 0;
+    }
+    loadPidProfile();
 }
 
 bool readEEPROM(void)

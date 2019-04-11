@@ -224,9 +224,10 @@ bool pwmAreMotorsEnabled(void)
 }
 
 #ifdef USE_DSHOT_TELEMETRY
-static void pwmStartWriteUnused(uint8_t motorCount)
+static bool pwmStartWriteUnused(uint8_t motorCount)
 {
     UNUSED(motorCount);
+    return true;
 }
 #endif
 
@@ -253,9 +254,9 @@ void pwmCompleteMotorUpdate(uint8_t motorCount)
 }
 
 #ifdef USE_DSHOT_TELEMETRY
-void pwmStartMotorUpdate(uint8_t motorCount)
+bool pwmStartMotorUpdate(uint8_t motorCount)
 {
-    pwmStartWrite(motorCount);
+    return pwmStartWrite(motorCount);
 }
 #endif
 
@@ -455,7 +456,11 @@ FAST_CODE bool pwmDshotCommandIsProcessing(void)
         return false;
     }
     dshotCommandControl_t* command = &commandQueue[commandQueueTail];
-    return command->nextCommandAtUs && !command->waitingForIdle && command->repeats > 0;
+    // Check if this is the last command in the queue. If not then we want to
+    // keep sending the command instead of falling back to the motor value to
+    // prevent a motor command frame to slip through between the this and the next command.
+    const bool isLastCommand = (commandQueueTail + 1) % (DSHOT_MAX_COMMANDS + 1) == commandQueueHead;
+    return (command->nextCommandAtUs && !command->waitingForIdle && command->repeats > 0) || !isLastCommand;
 }
 
 FAST_CODE void pwmDshotCommandQueueUpdate(void)
@@ -466,6 +471,12 @@ FAST_CODE void pwmDshotCommandQueueUpdate(void)
     dshotCommandControl_t* command = &commandQueue[commandQueueTail];
     if (!command->nextCommandAtUs && !command->waitingForIdle && !command->repeats) {
         commandQueueTail = (commandQueueTail + 1) % (DSHOT_MAX_COMMANDS + 1);
+        if (pwmDshotCommandIsQueued()) {
+            // there's another command in the queue
+            dshotCommandControl_t* nextCommand = &commandQueue[commandQueueTail];
+            nextCommand->waitingForIdle = false;
+            nextCommand->nextCommandAtUs = micros() + command->delayAfterCommandUs;
+        }
     }
 }
 
@@ -521,7 +532,9 @@ void pwmWriteDshotCommand(uint8_t index, uint8_t motorCount, uint8_t command, bo
             delayMicroseconds(DSHOT_COMMAND_DELAY_US);
 
 #ifdef USE_DSHOT_TELEMETRY
-            pwmStartDshotMotorUpdate(motorCount);
+            timeUs_t currentTimeUs = micros();
+            while (!pwmStartDshotMotorUpdate(motorCount) &&
+                   cmpTimeUs(micros(), currentTimeUs) < 1000);
 #endif
             for (uint8_t i = 0; i < motorCount; i++) {
                 if ((i == index) || (index == ALL_MOTORS)) {
@@ -544,7 +557,7 @@ void pwmWriteDshotCommand(uint8_t index, uint8_t motorCount, uint8_t command, bo
                 if (index == i || index == ALL_MOTORS) {
                     commandControl->command[i] = command;
                 } else {
-                    commandControl->command[i] = command;
+                    commandControl->command[i] = DSHOT_CMD_MOTOR_STOP;
                 }
             }
             commandControl->waitingForIdle = !allMotorsAreIdle(motorCount);
@@ -684,10 +697,10 @@ void beeperPwmInit(const ioTag_t tag, uint16_t frequency)
     if (beeperIO && timer) {
         beeperPwm.io = beeperIO;
         IOInit(beeperPwm.io, OWNER_BEEPER, RESOURCE_INDEX(0));
-#if defined(USE_HAL_DRIVER)
-        IOConfigGPIOAF(beeperPwm.io, IOCFG_AF_PP, timer->alternateFunction);
-#else
+#if defined(STM32F1)
         IOConfigGPIO(beeperPwm.io, IOCFG_AF_PP);
+#else
+        IOConfigGPIOAF(beeperPwm.io, IOCFG_AF_PP, timer->alternateFunction);
 #endif
         freqBeep = frequency;
         pwmOutConfig(&beeperPwm.channel, timer, PWM_TIMER_1MHZ, PWM_TIMER_1MHZ / freqBeep, (PWM_TIMER_1MHZ / freqBeep) / 2, 0);
