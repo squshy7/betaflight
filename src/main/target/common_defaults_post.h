@@ -262,17 +262,35 @@
 #endif
 
 #ifdef USE_RX_SPI
+#if !defined(RX_SPI_INSTANCE)
+#define RX_SPI_INSTANCE NULL
+#endif
+
+#if !defined(RX_NSS_PIN)
+#define RX_NSS_PIN NONE
+#endif
+
 #ifndef RX_SPI_LED_PIN
 #define RX_SPI_LED_PIN NONE
 #endif
+
+#if !defined(RX_SPI_EXTI_PIN)
+#define RX_SPI_EXTI_PIN NONE
 #endif
 
-// F4 and F7 single gyro boards
-#if defined(USE_MULTI_GYRO) && !defined(GYRO_2_SPI_INSTANCE)
-#define GYRO_2_SPI_INSTANCE     GYRO_1_SPI_INSTANCE
-#define GYRO_2_CS_PIN           NONE
-#define GYRO_2_ALIGN            ALIGN_DEFAULT
-#define GYRO_2_EXTI_PIN         NONE
+#if defined(USE_RX_CC2500)
+#if !defined(RX_CC2500_SPI_TX_EN_PIN)
+#define RX_CC2500_SPI_TX_EN_PIN NONE
+#endif
+
+#if !defined(RX_CC2500_SPI_LNA_EN_PIN)
+#define RX_CC2500_SPI_LNA_EN_PIN NONE
+#endif
+
+#if !defined(RX_CC2500_SPI_ANT_SEL_PIN)
+#define RX_CC2500_SPI_ANT_SEL_PIN NONE
+#endif
+#endif
 #endif
 
 #if !defined(GYRO_1_SPI_INSTANCE)
@@ -289,6 +307,14 @@
 
 #if !defined(GYRO_1_ALIGN)
 #define GYRO_1_ALIGN            ALIGN_DEFAULT
+#endif
+
+// F4 and F7 single gyro boards
+#if defined(USE_MULTI_GYRO) && !defined(GYRO_2_SPI_INSTANCE)
+#define GYRO_2_SPI_INSTANCE     GYRO_1_SPI_INSTANCE
+#define GYRO_2_CS_PIN           NONE
+#define GYRO_2_ALIGN            ALIGN_DEFAULT
+#define GYRO_2_EXTI_PIN         NONE
 #endif
 
 #if defined(MPU_ADDRESS)
@@ -401,7 +427,7 @@
 #endif
 
 #ifdef USE_ADC
-#if !defined(GENERIC_TARGET) && !defined(ADC_INSTANCE)
+#if !defined(USE_UNIFIED_TARGET) && !defined(ADC_INSTANCE)
 #define ADC_INSTANCE ADC1
 #ifndef ADC1_DMA_OPT
 #define ADC1_DMA_OPT 1

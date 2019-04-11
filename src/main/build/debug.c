@@ -18,8 +18,9 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "stdint.h"
+#include <stdint.h>
 
+#include "platform.h"
 
 #include "debug.h"
 
@@ -81,5 +82,7 @@ const char * const debugModeNames[DEBUG_COUNT] = {
     "RX_SPEKTRUM_SPI",
     "DSHOT_RPM_TELEMETRY",
     "RPM_FILTER",
-    "D_CUT",
+    "D_MIN",
+    "AC_CORRECTION",
+    "AC_ERROR",
 };

@@ -86,6 +86,7 @@ static long cmsx_Ledstrip_OnExit(const OSD_Entry *self)
 
     if (cmsx_FeatureLedstrip) {
         featureEnable(FEATURE_LED_STRIP);
+        ledStripEnable();
     } else {
         ledStripDisable();
         featureDisable(FEATURE_LED_STRIP);
@@ -103,7 +104,7 @@ static long cmsx_Ledstrip_OnExit(const OSD_Entry *self)
     return 0;
 }
 
-static OSD_Entry cmsx_menuLedstripEntries[] =
+static const OSD_Entry cmsx_menuLedstripEntries[] =
 {
     { "-- LED STRIP --",  OME_Label, NULL, NULL, 0 },
     { "ENABLED",          OME_Bool,  NULL, &cmsx_FeatureLedstrip, 0 },

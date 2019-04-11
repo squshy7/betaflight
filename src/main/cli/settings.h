@@ -52,9 +52,6 @@ typedef enum {
     TABLE_RX_SPI,
 #endif
     TABLE_GYRO_HARDWARE_LPF,
-#if defined(USE_32K_CAPABLE_GYRO) && defined(USE_GYRO_DLPF_EXPERIMENTAL)
-    TABLE_GYRO_32KHZ_HARDWARE_LPF,
-#endif
     TABLE_ACC_HARDWARE,
 #ifdef USE_BARO
     TABLE_BARO_HARDWARE,
@@ -161,6 +158,7 @@ typedef enum {
     MASTER_VALUE = (0 << VALUE_SECTION_OFFSET),
     PROFILE_VALUE = (1 << VALUE_SECTION_OFFSET),
     PROFILE_RATE_VALUE = (2 << VALUE_SECTION_OFFSET),
+    HARDWARE_VALUE = (3 << VALUE_SECTION_OFFSET), // Part of the master section, but used for the hardware definition
 
     // value mode, bits 5-6
     MODE_DIRECT = (0 << VALUE_MODE_OFFSET),

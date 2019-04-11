@@ -86,7 +86,7 @@ void pgResetFn_motorConfig(motorConfig_t *motorConfig)
     motorConfig->dev.useUnsyncedPwm = true;
 #else
 #ifdef USE_BRUSHED_ESC_AUTODETECT
-    if (hardwareMotorType == MOTOR_BRUSHED) {
+    if (getDetectedMotorType() == MOTOR_BRUSHED) {
         motorConfig->minthrottle = 1000;
         motorConfig->dev.motorPwmRate = BRUSHED_MOTORS_PWM_RATE;
         motorConfig->dev.motorPwmProtocol = PWM_TYPE_BRUSHED;
@@ -518,7 +518,9 @@ void writeMotors(void)
 {
     if (pwmAreMotorsEnabled()) {
 #if defined(USE_DSHOT) && defined(USE_DSHOT_TELEMETRY)
-        pwmStartMotorUpdate(motorCount);
+        if (!pwmStartMotorUpdate(motorCount)) {
+            return;
+        }
 #endif
         for (int i = 0; i < motorCount; i++) {
             pwmWriteMotor(i, motor[i]);
@@ -926,7 +928,13 @@ FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs, uint8_t vbatPidCompensa
     }
 #endif
 
+#ifdef USE_AIRMODE_LPF
+    const float unadjustedThrottle = throttle;
+    throttle += pidGetAirmodeThrottleOffset();
+    float airmodeThrottleChange = 0;
+#endif
     loggingThrottle = throttle;
+
     motorMixRange = motorMixMax - motorMixMin;
     if (motorMixRange > 1.0f) {
         for (int i = 0; i < motorCount; i++) {
@@ -939,8 +947,15 @@ FAST_CODE_NOINLINE void mixTable(timeUs_t currentTimeUs, uint8_t vbatPidCompensa
     } else {
         if (airmodeEnabled || throttle > 0.5f) {  // Only automatically adjust throttle when airmode enabled. Airmode logic is always active on high throttle
             throttle = constrainf(throttle, -motorMixMin, 1.0f - motorMixMax);
+#ifdef USE_AIRMODE_LPF
+            airmodeThrottleChange = constrainf(unadjustedThrottle, -motorMixMin, 1.0f - motorMixMax) - unadjustedThrottle;
+#endif
         }
     }
+
+#ifdef USE_AIRMODE_LPF
+    pidUpdateAirmodeLpf(airmodeThrottleChange);
+#endif
 
     if (featureIsEnabled(FEATURE_MOTOR_STOP)
         && ARMING_FLAG(ARMED)
@@ -1024,3 +1039,15 @@ float mixerGetLoggingThrottle(void)
 {
     return loggingThrottle;
 }
+
+#ifdef USE_DSHOT_TELEMETRY
+bool isDshotTelemetryActive(void)
+{
+    for (uint8_t i = 0; i < motorCount; i++) {
+        if (!isDshotMotorTelemetryActive(i)) {
+            return false;
+        }
+    }
+    return true;
+}
+#endif
