@@ -172,6 +172,7 @@ typedef struct pidProfile_s {
     uint16_t ff_max_rate;                    // Max implied setpoint rate to allow for FF
     uint8_t ff_min_spread;                  // Spread ff out over at least min spread ms
     uint8_t ff_thumb_limit;                 // FF limit based on stick speed
+    uint8_t feedforward_return_factor;      // The percentage of feedforward used when stick is returning to center
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);
@@ -246,4 +247,3 @@ float calcHorizonLevelStrength(void);
 void dynLpfDTermUpdate(float throttle);
 void pidSetItermReset(bool enabled);
 float pidGetPreviousSetpoint(int axis);
-
