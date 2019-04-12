@@ -131,7 +131,7 @@ void rpmFilterInit(const rpmFilterConfig_t *config)
     filterUpdatesPerIteration = rintf(filtersPerLoopIteration + 0.49f);
 }
 
-static float applyFilter(rpmNotchFilter_t* filter, int axis, float value)
+FAST_CODE_NOINLINE static float applyFilter(rpmNotchFilter_t* filter, int axis, float value)
 {
     if (filter == NULL) {
         return value;
