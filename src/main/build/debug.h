@@ -102,6 +102,7 @@ typedef enum {
     DEBUG_AC_CORRECTION,
     DEBUG_AC_ERROR,
     DEBUG_FF_THUMB,
+    DEBUG_DUAL_GYRO_SCALED,
     DEBUG_COUNT
 } debugType_e;
 

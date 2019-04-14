@@ -87,6 +87,7 @@
 #include "pg/usb.h"
 #include "pg/sdio.h"
 #include "pg/rcdevice.h"
+#include "pg/stats.h"
 
 #include "rx/rx.h"
 #include "rx/cc2500_frsky_common.h"
@@ -150,7 +151,7 @@ static const char * const lookupTableOffOn[] = {
 };
 
 static const char * const lookupTableCrashRecovery[] = {
-    "OFF", "ON" ,"BEEP"
+    "OFF", "ON" ,"BEEP", "DISARM"
 };
 
 static const char * const lookupTableUnit[] = {
@@ -605,7 +606,7 @@ const clivalue_t valueTable[] = {
     { "dyn_notch_range",           VAR_UINT8   | MASTER_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_DYNAMIC_FILTER_RANGE }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, dyn_notch_range) },
     { "dyn_notch_width_percent",   VAR_UINT8   | MASTER_VALUE, .config.minmaxUnsigned = { 0, 20 }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, dyn_notch_width_percent) },
     { "dyn_notch_q",               VAR_UINT16  | MASTER_VALUE, .config.minmaxUnsigned = { 1, 1000 }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, dyn_notch_q) },
-    { "dyn_notch_min_hz",          VAR_UINT16  | MASTER_VALUE, .config.minmaxUnsigned = { 100, 1000 }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, dyn_notch_min_hz) },
+    { "dyn_notch_min_hz",          VAR_UINT16  | MASTER_VALUE, .config.minmaxUnsigned = { 60, 1000 }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, dyn_notch_min_hz) },
 #endif
 #ifdef USE_DYN_LPF
     { "dyn_lpf_gyro_min_hz",        VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { 0, 1000 }, PG_GYRO_CONFIG, offsetof(gyroConfig_t, dyn_lpf_gyro_min_hz) },
@@ -874,6 +875,8 @@ const clivalue_t valueTable[] = {
     { "gps_rescue_angle",           VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { 0, 200 }, PG_GPS_RESCUE, offsetof(gpsRescueConfig_t, angle) },
     { "gps_rescue_initial_alt",     VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { 20, 100 }, PG_GPS_RESCUE, offsetof(gpsRescueConfig_t, initialAltitudeM) },
     { "gps_rescue_descent_dist",    VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { 30, 500 }, PG_GPS_RESCUE, offsetof(gpsRescueConfig_t, descentDistanceM) },
+    { "gps_rescue_landing_alt",     VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { 3, 10 }, PG_GPS_RESCUE, offsetof(gpsRescueConfig_t, targetLandingAltitudeM) },
+    { "gps_rescue_landing_dist",    VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { 5, 15 }, PG_GPS_RESCUE, offsetof(gpsRescueConfig_t, targetLandingDistanceM) },
     { "gps_rescue_ground_speed",    VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { 30, 3000 }, PG_GPS_RESCUE, offsetof(gpsRescueConfig_t, rescueGroundspeed) },
     { "gps_rescue_throttle_p",      VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { 0, 500 }, PG_GPS_RESCUE, offsetof(gpsRescueConfig_t, throttleP) },
     { "gps_rescue_throttle_i",      VAR_UINT16 | MASTER_VALUE, .config.minmaxUnsigned = { 0, 500 }, PG_GPS_RESCUE, offsetof(gpsRescueConfig_t, throttleI) },
@@ -933,9 +936,6 @@ const clivalue_t valueTable[] = {
     { "crash_recovery",             VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_CRASH_RECOVERY }, PG_PID_PROFILE, offsetof(pidProfile_t, crash_recovery) },
 
     { "iterm_rotation",             VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_OFF_ON }, PG_PID_PROFILE, offsetof(pidProfile_t, iterm_rotation) },
-#if defined(USE_SMART_FEEDFORWARD)
-    { "smart_feedforward",          VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_OFF_ON }, PG_PID_PROFILE, offsetof(pidProfile_t, smart_feedforward) },
-#endif
 #if defined(USE_ITERM_RELAX)
     { "iterm_relax",                VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_ITERM_RELAX }, PG_PID_PROFILE, offsetof(pidProfile_t, iterm_relax) },
     { "iterm_relax_type",           VAR_UINT8  | PROFILE_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_ITERM_RELAX_TYPE }, PG_PID_PROFILE, offsetof(pidProfile_t, iterm_relax_type) },
@@ -1419,6 +1419,13 @@ const clivalue_t valueTable[] = {
 #ifdef USE_RX_FLYSKY
     { "flysky_spi_tx_id",       VAR_UINT32 | MASTER_VALUE, .config.u32Max = UINT32_MAX, PG_FLYSKY_CONFIG, offsetof(flySkyConfig_t, txId) },
     { "flysky_spi_rf_channels", VAR_UINT8 | MASTER_VALUE | MODE_ARRAY, .config.array.length = 16, PG_FLYSKY_CONFIG, offsetof(flySkyConfig_t, rfChannelMap) },
+#endif
+
+#ifdef USE_PERSISTENT_STATS
+    { "stats",                  VAR_INT8   | MASTER_VALUE | MODE_LOOKUP, .config.lookup = { TABLE_OFF_ON }, PG_STATS_CONFIG, offsetof(statsConfig_t, stats_enabled) },
+    { "stats_total_flights",    VAR_UINT32 | MASTER_VALUE, .config.u32Max = UINT32_MAX, PG_STATS_CONFIG, offsetof(statsConfig_t, stats_total_flights) },
+    { "stats_total_time_s",     VAR_UINT32 | MASTER_VALUE, .config.u32Max = UINT32_MAX, PG_STATS_CONFIG, offsetof(statsConfig_t, stats_total_time_s) },
+    { "stats_total_dist_m",     VAR_UINT32 | MASTER_VALUE, .config.u32Max = UINT32_MAX, PG_STATS_CONFIG, offsetof(statsConfig_t, stats_total_dist_m) },
 #endif
 };
 
