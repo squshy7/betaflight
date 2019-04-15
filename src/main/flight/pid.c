@@ -648,6 +648,10 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     acLimit = (float)pidProfile->abs_control_limit;
     acErrorLimit = (float)pidProfile->abs_control_error_limit;
     acCutoff = (float)pidProfile->abs_control_cutoff;
+    for (int axis = FD_ROLL; axis <= FD_YAW; axis++) {
+        float iCorrection = -acGain * PTERM_SCALE / ITERM_SCALE * pidCoefficient[axis].Kp;
+        pidCoefficient[axis].Ki = MAX(0.0f, pidCoefficient[axis].Ki + iCorrection);
+    }
 #endif
 
 #ifdef USE_DYN_LPF
