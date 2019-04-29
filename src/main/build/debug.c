@@ -87,4 +87,5 @@ const char * const debugModeNames[DEBUG_COUNT] = {
     "AC_ERROR",
     "FF_THUMB",
     "DUAL_GYRO_SCALED",
+    "DSHOT_RPM_ERRORS",
 };
