@@ -1528,9 +1528,9 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
                 }
             }
 
-#if defined(USE_SMART_FEEDFORWARD)
-            applySmartFeedforward(axis);
-#endif
+//#if defined(USE_SMART_FEEDFORWARD)
+//            applySmartFeedforward(axis);
+//#endif
         } else {
             pidData[axis].F = 0;
         }
