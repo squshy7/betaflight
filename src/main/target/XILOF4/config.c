@@ -18,58 +18,44 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdbool.h>
 #include <stdint.h>
-
 #include "platform.h"
-
-#include "common/axis.h"
-
-#include "drivers/sensor.h"
-#include "drivers/compass/compass.h"
-#include "drivers/serial.h"
-
-#include "fc/rc_controls.h"
-
-#include "flight/failsafe.h"
-#include "flight/mixer.h"
-#include "flight/pid.h"
-
-#include "pg/rx.h"
-
-#include "rx/rx.h"
-
-#include "io/serial.h"
-
-#include "telemetry/telemetry.h"
-
-#include "sensors/sensors.h"
-#include "sensors/compass.h"
-#include "sensors/barometer.h"
-
-#include "config/feature.h"
-
-#include "fc/config.h"
 
 #ifdef USE_TARGET_CONFIG
 
+#include "pg/pinio.h"
+#include "pg/piniobox.h"
+
+#include "drivers/io.h"
+#include "pg/rx.h"
+#include "rx/rx.h"
+#include "io/serial.h"
+
 #include "config_helper.h"
+#include "config/feature.h"
 
-#define GPS_UART                            SERIAL_PORT_USART3
+#include "sensors/battery.h"
 
-#define TELEMETRY_UART                      SERIAL_PORT_UART5
-#define TELEMETRY_PROVIDER_DEFAULT          FUNCTION_TELEMETRY_SMARTPORT
+#include "flight/mixer.h"
+#include "flight/pid.h"
+
+#define CURRENT_SCALE 118
 
 static targetSerialPortFunction_t targetSerialPortFunction[] = {
-    { SERIAL_PORT_USART1, FUNCTION_MSP },
-    { TELEMETRY_UART,     TELEMETRY_PROVIDER_DEFAULT },
-    { GPS_UART,           FUNCTION_GPS },
+    { SERIAL_PORT_USART1, FUNCTION_RX_SERIAL },
+    { SERIAL_PORT_USART2, FUNCTION_ESC_SENSOR },
 };
 
 void targetConfiguration(void)
 {
-    compassConfigMutable()->mag_hardware = MAG_DEFAULT;
+	pinioConfigMutable()->config[0] = PINIO_CONFIG_MODE_OUT_PP | PINIO_CONFIG_OUT_INVERTED;
+    pinioBoxConfigMutable()->permanentId[0] = 40;
+    motorConfigMutable()->dev.motorPwmProtocol = PWM_TYPE_DSHOT1200;
+    pidConfigMutable()->pid_process_denom = 1;
+    currentSensorADCConfigMutable()->scale = CURRENT_SCALE;
+    featureDisable(FEATURE_SOFTSERIAL);
+    featureEnable(FEATURE_ESC_SENSOR);
     targetSerialPortFunctionConfig(targetSerialPortFunction, ARRAYLEN(targetSerialPortFunction));
-    telemetryConfigMutable()->halfDuplex = true;
 }
+
 #endif

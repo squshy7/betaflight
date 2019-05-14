@@ -52,6 +52,8 @@
 #include "io/serial.h"
 #include "io/gps.h"
 
+#include "osd/osd.h"
+
 #include "pg/beeper.h"
 #include "pg/beeper_dev.h"
 #include "pg/rx.h"
@@ -209,6 +211,13 @@ static void validateAndFixConfig(void)
 
         if (pidProfilesMutable(i)->auto_profile_cell_count > MAX_AUTO_DETECT_CELL_COUNT || pidProfilesMutable(i)->auto_profile_cell_count < AUTO_PROFILE_CELL_COUNT_CHANGE) {
             pidProfilesMutable(i)->auto_profile_cell_count = AUTO_PROFILE_CELL_COUNT_STAY;
+        }
+
+        // If the d_min value for any axis is >= the D gain then reset d_min to 0 for consistent Configurator behavior
+        for (unsigned axis = 0; axis <= FD_YAW; axis++) {
+            if (pidProfilesMutable(i)->d_min[axis] >= pidProfilesMutable(i)->pid[axis].D) {
+                pidProfilesMutable(i)->d_min[axis] = 0;
+            }
         }
     }
 
@@ -461,6 +470,16 @@ static void validateAndFixConfig(void)
     }
 #endif
 
+#if defined(USE_OSD)
+    for (int i = 0; i < OSD_TIMER_COUNT; i++) {
+         const uint16_t t = osdConfig()->timers[i];
+         if (OSD_TIMER_SRC(t) >= OSD_TIMER_SRC_COUNT ||
+                 OSD_TIMER_PRECISION(t) >= OSD_TIMER_PREC_COUNT) {
+             osdConfigMutable()->timers[i] = osdTimerDefault[i];
+         }
+     }
+#endif
+
 #if defined(TARGET_VALIDATECONFIG)
     targetValidateConfiguration();
 #endif
@@ -690,6 +709,7 @@ void changePidProfile(uint8_t pidProfileIndex)
         loadPidProfile();
 
         pidInit(currentPidProfile);
+        initEscEndpoints();
     }
 
     beeperConfirmationBeeps(pidProfileIndex + 1);

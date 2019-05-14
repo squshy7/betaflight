@@ -28,13 +28,16 @@
 #include "drivers/timer_def.h"
 
 const timerHardware_t timerHardware[USABLE_TIMER_CHANNEL_COUNT] = {
-    DEF_TIM(TIM2, CH4, PA3, TIM_USE_MOTOR, 0, 1 ), // S1_OUT - DMA1_ST6
-    DEF_TIM(TIM3, CH3, PB0, TIM_USE_MOTOR, 0, 0 ), // S2_OUT - DMA1_ST7
-    DEF_TIM(TIM2, CH3, PA2, TIM_USE_MOTOR, 0, 0 ), // S3_OUT - DMA1_ST1
-    DEF_TIM(TIM3, CH4, PB1, TIM_USE_MOTOR, 0, 0 ), // S4_OUT - DMA1_ST2
-#if defined(FF_PIKOF4OSD)
-    DEF_TIM(TIM8, CH2N, PB14, TIM_USE_MOTOR, 0, 0 ), // PA14 RC4  - DMA2_ST6, *DMA2_ST2
-    DEF_TIM(TIM1, CH3N, PB15, TIM_USE_MOTOR, 0, 0 ), // PA15 RC5  - DMA2_ST6, DMA2_ST6
-#endif
-    DEF_TIM(TIM4, CH2, PB7, TIM_USE_LED,   0, 0 ), // LED    - DMA1_ST3
+    
+    DEF_TIM(TIM3, CH3, PB0, TIM_USE_MOTOR, 0, 0),   // S1
+    DEF_TIM(TIM3, CH4, PB1, TIM_USE_MOTOR, 0, 0),   // S2
+    DEF_TIM(TIM8, CH1, PC6, TIM_USE_MOTOR, 0, 0),   // S3
+    DEF_TIM(TIM8, CH2, PC7, TIM_USE_MOTOR, 0, 0),   // S4
+
+    DEF_TIM(TIM2, CH2, PB3, TIM_USE_PWM, 0, 0),     // S5
+    DEF_TIM(TIM3, CH1, PB4, TIM_USE_PWM, 0, 0),     // S6
+
+    DEF_TIM(TIM4, CH3, PB8, TIM_USE_PWM, 0, 0),     // Cam Control
+
+    DEF_TIM(TIM2, CH1, PA15, TIM_USE_LED, 0, 0),    // LED STRIP
 };
