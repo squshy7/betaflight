@@ -146,9 +146,9 @@
 #define USE_PPM
 #define USE_SERIAL_RX
 //#define USE_SERIALRX_CRSF       // Team Black Sheep Crossfire protocol
-#define USE_SERIALRX_IBUS       // FlySky and Turnigy receivers
+//#define USE_SERIALRX_IBUS       // FlySky and Turnigy receivers
 #define USE_SERIALRX_SBUS       // Frsky and Futaba receivers
-#define USE_SERIALRX_SPEKTRUM   // SRXL, DSM2 and DSMX protocol
+//#define USE_SERIALRX_SPEKTRUM   // SRXL, DSM2 and DSMX protocol
 //#define USE_SERIALRX_SUMD       // Graupner Hott protocol
 
 #if (FLASH_SIZE > 128)
@@ -160,7 +160,7 @@
 #endif
 
 #if (FLASH_SIZE > 64)
-//#define USE_ACRO_TRAINER
+#define USE_ACRO_TRAINER
 #define USE_BLACKBOX
 #define USE_CLI_BATCH
 #define USE_RESOURCE_MGMT
@@ -208,7 +208,7 @@
 //#endif
 
 //#if ((FLASH_SIZE > 256) || (FEATURE_CUT_LEVEL < 8))
-#define USE_LAUNCH_CONTROL
+//#define USE_LAUNCH_CONTROL
 #define USE_DYN_LPF
 #define USE_D_MIN
 //#endif

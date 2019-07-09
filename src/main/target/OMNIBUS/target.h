@@ -25,6 +25,7 @@
 
 #define TARGET_BOARD_IDENTIFIER "OMNI" // https://en.wikipedia.org/wiki/Omnibus
 
+#undef USE_LED_STRIP
 #define LED0_PIN                PB3
 
 #define USE_BEEPER
